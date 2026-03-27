@@ -175,10 +175,10 @@ export function initLiquidInkBackground({
     lastTick = now;
 
     uniforms.uTime.value += delta;
-    uniforms.uPointer.value.lerp(pointerTarget, 0.08);
+    uniforms.uPointer.value.lerp(pointerTarget, 0.065);
 
     const pointerDelta = pointerTarget.clone().sub(uniforms.uPointer.value);
-    uniforms.uPointerShift.value.lerp(pointerDelta.multiplyScalar(10), 0.07);
+    uniforms.uPointerShift.value.lerp(pointerDelta.multiplyScalar(12), 0.05);
 
     const targetAlpha = active ? 1 : 0;
     uniforms.uAlpha.value += (targetAlpha - uniforms.uAlpha.value) * 0.06;
