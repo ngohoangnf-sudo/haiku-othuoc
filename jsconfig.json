@@ -1,0 +1,8 @@
+{
+  "extends": "./.quasar/tsconfig.json",
+  "exclude": [
+    "dist",
+    ".quasar",
+    "node_modules"
+  ]
+}

@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  haiku:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    environment:
+      - NODE_ENV=production
+    volumes:
+      - haiku_data:/app/server/data
+    restart: unless-stopped
+
+volumes:
+  haiku_data:
