@@ -1,12 +1,12 @@
 <template>
   <div class="content">
     <div class="content__item" style="--aspect-ratio: 12/60">
-      <h2 class="content__item-title content__item-title--layer">{{ authorName }}</h2>
+      <h2 class="content__item-title content__item-title--layer page-reading-h2">{{ authorName }}</h2>
       <div class="content__item-description">
-        <p>Trang tác giả với {{ poems.length }} bài haiku.</p>
-        <p v-if="error">{{ error }}</p>
-        <p v-else-if="loading">Đang tải...</p>
-        <p v-if="authors.length">Tác giả khác: 
+        <p class="page-reading-copy">Trang tác giả với {{ poems.length }} bài haiku.</p>
+        <p v-if="error" class="page-reading-copy">{{ error }}</p>
+        <p v-else-if="loading" class="page-reading-copy">Đang tải...</p>
+        <p v-if="authors.length" class="page-reading-copy">Tác giả khác: 
           <router-link
             v-for="item in authors"
             :key="item.authorSlug"
@@ -20,18 +20,18 @@
     </div>
 
     <div v-for="(poem, index) in poems" :key="poem.id" class="content__item" style="--aspect-ratio: 700/200">
-      <h3 class="content__item-title content__item-title--layer">{{ poem.title || "Haiku" }}</h3>
+      <h3 v-if="poem.title" class="content__item-title content__item-title--layer page-reading-h3">{{ poem.title }}</h3>
       <div class="content__item-poem without-image grid g3">
         <div class="link w-inline-block -col-or-link">
-          <p v-for="(line, i) in poem.lines" :key="i" class="nowrap" :class="index % 2 === 0 ? 'left' : 'right'">{{ line }}</p>
-          <router-link :to="'/post/' + poem.id" class="link"><p class="left">Xem bài · {{ formatDate(poem.publishedAt) }}</p></router-link>
+          <p v-for="(line, i) in poem.lines" :key="i" class="nowrap page-reading-copy" :class="index % 2 === 0 ? 'left' : 'right'">{{ line }}</p>
+          <router-link :to="'/post/' + poem.id" class="link"><p class="left page-reading-copy">Xem bài · {{ formatDate(poem.publishedAt) }}</p></router-link>
         </div>
       </div>
     </div>
 
     <div v-if="!loading && !poems.length" class="content__item">
       <div class="content__item-description">
-        <p>Chưa có bài viết cho tác giả này.</p>
+        <p class="page-reading-copy">Chưa có bài viết cho tác giả này.</p>
       </div>
     </div>
   </div>

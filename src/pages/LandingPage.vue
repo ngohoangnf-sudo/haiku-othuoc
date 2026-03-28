@@ -87,16 +87,10 @@ import _3 from "assets/3.jpg";
 import _4 from "assets/4.jpg";
 import _5 from "assets/5.jpg";
 import _7 from "assets/7.jpg";
-import * as imagesloaded from "assets/imagesloaded.pkgd.min.js";
+import "assets/imagesloaded.pkgd.min.js";
 import { initLandingPage } from "assets/landing_page.js";
-import * as tweenlite from "assets/js/TweenLite.min.js";
-// import * as effectshell from "assets/js/EffectShell.js";
-import * as math from "assets/js/Math.js";
-// import * as rgbshifteffect from "assets/js/RGBShiftEffect.js";
-// import * as StretchEffect from "assets/js/StretchEffect.js";
-import * as three from "assets/js/three.min.js";
-// import * as TrailsEffect from "assets/js/TrailsEffect.js";
-// import * as tweenmax from "assets/TweenMax.js";
+import "assets/js/TweenLite.min.js";
+import "assets/js/Math.js";
 
 export default defineComponent({
   name: "LandingPage",

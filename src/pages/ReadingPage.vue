@@ -42,7 +42,7 @@
       ]"
       :style="itemGridStyle(index)"
     >
-      <h3 class="content__item-title content__item-title--layer reading-page__title">{{ poem.title || "Haiku" }}</h3>
+      <h3 v-if="poem.title" class="content__item-title content__item-title--layer reading-page__title">{{ poem.title }}</h3>
       <div
         ref="poemEffectWrappers"
         class="content__item-poem content__item-img without-image grid g3 reading-page__poem"
@@ -80,6 +80,9 @@ import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, w
 import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { initHoverImageEffects } from "assets/hover_image_effect.js";
+import { resolveMediaUrl } from "src/utils/runtime";
+import "assets/js/TweenLite.min.js";
+import "assets/js/Math.js";
 
 export default defineComponent({
   name: "ReadingPage",
@@ -101,12 +104,6 @@ export default defineComponent({
     });
 
     const poems = computed(() => blogStore.getPostsByCategory(category.value));
-
-    const resolveImage = (image) => {
-      if (!image) return "";
-      if (image.startsWith("http")) return image;
-      return `/src/assets/${image}`;
-    };
 
     const loading = computed(() => blogStore.state.loading);
     const error = computed(() => blogStore.state.error);
@@ -213,12 +210,6 @@ export default defineComponent({
         return;
       }
 
-      await Promise.all([
-        import("assets/js/Math.js"),
-        import("assets/js/TweenLite.min.js"),
-        import("assets/js/three.min.js"),
-      ]);
-
       if (setupId !== hoverEffectSetupId) {
         return;
       }
@@ -226,7 +217,7 @@ export default defineComponent({
       const mainElement = document.querySelector("main");
       const scrollLayer = mainElement?.querySelector("[data-scroll]") || null;
 
-      destroyHoverEffects = initHoverImageEffects({
+      destroyHoverEffects = await initHoverImageEffects({
         container: mainElement || document.body,
         foreground: scrollLayer,
         wrappers,
@@ -259,7 +250,7 @@ export default defineComponent({
     return {
       poems,
       category,
-      resolveImage,
+      resolveImage: resolveMediaUrl,
       loading,
       error,
       itemGridStyle,
@@ -396,7 +387,7 @@ export default defineComponent({
   margin: 12vh auto 0;
   padding: 2rem 1rem 3rem;
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   isolation: isolate;
 }
 
@@ -436,7 +427,8 @@ export default defineComponent({
 }
 
 .reading-page__poem p {
-  width: min(100%, 28rem);
+  width: max-content;
+  max-width: calc(100vw - 4rem);
   position: relative;
   z-index: 13;
   mix-blend-mode: normal;

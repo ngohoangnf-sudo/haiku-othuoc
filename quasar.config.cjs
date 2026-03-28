@@ -1,5 +1,3 @@
-/* eslint-env node */
-
 /*
  * This file runs in a Node context (it's NOT transpiled by Babel), so use only
  * the features that are supported by your Node version.
@@ -42,6 +40,10 @@ module.exports = configure(function (/* ctx */) {
       proxy: {
         '/api': {
           target: process.env.API_PROXY_TARGET || 'http://localhost:4000',
+          changeOrigin: true
+        },
+        '/media': {
+          target: process.env.MEDIA_PROXY_TARGET || process.env.API_PROXY_TARGET || 'http://localhost:4000',
           changeOrigin: true
         }
       }

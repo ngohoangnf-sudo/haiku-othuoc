@@ -1,21 +1,37 @@
-import * as THREE from "three";
+let threeModulePromise = null;
 
-export function initLiquidInkBackground({
+function loadThree() {
+  if (!threeModulePromise) {
+    threeModulePromise = import("three");
+  }
+
+  return threeModulePromise;
+}
+
+export async function initLiquidInkBackground({
   mount,
   prefersReducedMotion = false,
 } = {}) {
+  const pixelRatioCap = 1;
+  const targetFps = 30;
+  const frameInterval = 1000 / targetFps;
+
   if (!mount || typeof window === "undefined" || prefersReducedMotion) {
     return {
       setActive: () => {},
+      setInteractive: () => {},
+      setAnimated: () => {},
       destroy: () => {},
     };
   }
+
+  const THREE = await loadThree();
 
   const renderer = new THREE.WebGLRenderer({
     antialias: true,
     alpha: true,
   });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   Object.assign(renderer.domElement.style, {
@@ -120,7 +136,7 @@ export function initLiquidInkBackground({
 
         vec2 pointer = (uPointer - 0.5) * aspect;
         float pointerFalloff = exp(-4.0 * distance(centered, pointer));
-        vec2 wake = uPointerShift * pointerFalloff * 0.85;
+        vec2 wake = uPointerShift * pointerFalloff * 0.5;
 
         vec2 p = centered * 2.4;
         p += wake;
@@ -129,10 +145,10 @@ export function initLiquidInkBackground({
         vec2 secondaryFlow = warp((rotate2D(0.24) * p) * 1.12, 2.7);
         vec2 fluid = mix(primaryFlow, secondaryFlow, 0.42);
 
-        vec2 advection = fluid * 1.1 + wake * 0.55;
+        vec2 advection = fluid * 1.1 + wake * 0.38;
         float inkBody = fbm(p + advection + vec2(uTime * 0.012, -uTime * 0.009));
         float inkShadow = fbm((p * 1.45) - fluid * 1.2 - vec2(uTime * 0.01, uTime * 0.006));
-        float tendrils = ridge((p * 1.85) + fluid * 1.45 - wake * 0.7 - vec2(uTime * 0.006, -uTime * 0.005));
+        float tendrils = ridge((p * 1.85) + fluid * 1.45 - wake * 0.45 - vec2(uTime * 0.006, -uTime * 0.005));
         float eddies = ridge((rotate2D(-0.3) * p * 2.3) - fluid * 0.9 + vec2(uTime * 0.007, uTime * 0.004));
 
         float bloom = smoothstep(0.2, 0.94, inkBody * 0.72 + inkShadow * 0.35);
@@ -161,20 +177,60 @@ export function initLiquidInkBackground({
   scene.add(mesh);
 
   let active = true;
+  let interactive = true;
+  let animated = true;
   let destroyed = false;
+  let pointerListenersAttached = false;
   let rafId = 0;
   let lastTick = performance.now();
+  let lastFrameTime = performance.now();
   const pointerTarget = new THREE.Vector2(0.5, 0.5);
+  const settleThreshold = 0.0015;
+  const alphaThreshold = 0.01;
+
+  const renderFrame = () => {
+    renderer.render(scene, camera);
+  };
+
+  const stopLoop = () => {
+    if (!rafId) {
+      return;
+    }
+
+    window.cancelAnimationFrame(rafId);
+    rafId = 0;
+  };
+
+  const startLoop = () => {
+    if (rafId || destroyed) {
+      return;
+    }
+
+    const now = performance.now();
+    lastTick = now;
+    lastFrameTime = now;
+    rafId = window.requestAnimationFrame(tick);
+  };
 
   const tick = (now) => {
     if (destroyed) {
       return;
     }
 
+    const elapsedSinceFrame = now - lastFrameTime;
+    if (elapsedSinceFrame < frameInterval) {
+      rafId = window.requestAnimationFrame(tick);
+      return;
+    }
+
     const delta = Math.min((now - lastTick) / 1000, 0.033);
     lastTick = now;
+    lastFrameTime = now;
 
-    uniforms.uTime.value += delta;
+    if (animated) {
+      uniforms.uTime.value += delta;
+    }
+
     uniforms.uPointer.value.lerp(pointerTarget, 0.065);
 
     const pointerDelta = pointerTarget.clone().sub(uniforms.uPointer.value);
@@ -183,13 +239,34 @@ export function initLiquidInkBackground({
     const targetAlpha = active ? 1 : 0;
     uniforms.uAlpha.value += (targetAlpha - uniforms.uAlpha.value) * 0.06;
 
-    renderer.render(scene, camera);
-    rafId = window.requestAnimationFrame(tick);
+    renderFrame();
+
+    if (animated) {
+      rafId = window.requestAnimationFrame(tick);
+      return;
+    }
+
+    const shouldContinue =
+      pointerTarget.distanceTo(uniforms.uPointer.value) > settleThreshold ||
+      uniforms.uPointerShift.value.length() > settleThreshold ||
+      Math.abs(targetAlpha - uniforms.uAlpha.value) > alphaThreshold;
+
+    if (shouldContinue) {
+      rafId = window.requestAnimationFrame(tick);
+      return;
+    }
+
+    rafId = 0;
   };
 
   const handleResize = () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
     uniforms.uResolution.value.set(window.innerWidth, window.innerHeight);
+    if (animated) {
+      return;
+    }
+
+    renderFrame();
   };
 
   const handlePointerMove = (event) => {
@@ -197,31 +274,79 @@ export function initLiquidInkBackground({
       event.clientX / Math.max(window.innerWidth, 1),
       1 - event.clientY / Math.max(window.innerHeight, 1)
     );
+
+    if (!animated) {
+      startLoop();
+    }
   };
 
   const handlePointerLeave = () => {
     pointerTarget.set(0.5, 0.5);
+
+    if (!animated) {
+      startLoop();
+    }
   };
 
   window.addEventListener("resize", handleResize, false);
-  window.addEventListener("pointermove", handlePointerMove, { passive: true });
-  window.addEventListener("pointerleave", handlePointerLeave, false);
 
-  rafId = window.requestAnimationFrame(tick);
+  const addPointerListeners = () => {
+    if (pointerListenersAttached) {
+      return;
+    }
+
+    window.addEventListener("pointermove", handlePointerMove, { passive: true });
+    window.addEventListener("pointerleave", handlePointerLeave, false);
+    pointerListenersAttached = true;
+  };
+
+  const removePointerListeners = () => {
+    if (!pointerListenersAttached) {
+      return;
+    }
+
+    window.removeEventListener("pointermove", handlePointerMove);
+    window.removeEventListener("pointerleave", handlePointerLeave, false);
+    pointerListenersAttached = false;
+  };
+
+  addPointerListeners();
+  startLoop();
 
   return {
     setActive(nextActive) {
       active = nextActive;
+      startLoop();
+    },
+    setInteractive(nextInteractive) {
+      interactive = nextInteractive;
+
+      if (interactive) {
+        addPointerListeners();
+        return;
+      }
+
+      removePointerListeners();
+      pointerTarget.set(0.5, 0.5);
+      startLoop();
+    },
+    setAnimated(nextAnimated) {
+      animated = nextAnimated;
+
+      if (animated) {
+        startLoop();
+        return;
+      }
+
+      stopLoop();
+      startLoop();
     },
     destroy() {
       destroyed = true;
       window.removeEventListener("resize", handleResize, false);
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerleave", handlePointerLeave, false);
+      removePointerListeners();
 
-      if (rafId) {
-        window.cancelAnimationFrame(rafId);
-      }
+      stopLoop();
 
       material.dispose();
       mesh.geometry.dispose();

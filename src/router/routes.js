@@ -33,11 +33,38 @@ const routes = [
   },
 
   {
+    path: "/login",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [{ path: "", component: () => import("pages/LoginPage.vue") }],
+  },
+
+  {
+    path: "/admin",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [
+      {
+        path: "",
+        component: () => import("pages/AdminPage.vue"),
+        meta: { requiresAdmin: true },
+      },
+    ],
+  },
+
+  {
     path: "/authors",
     component: () => import("layouts/MainLayout.vue"),
     children: [
       { path: "", component: () => import("pages/AuthorPage.vue") },
       { path: ":slug", component: () => import("pages/AuthorPage.vue") },
+    ],
+  },
+
+  {
+    path: "/essays",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [
+      { path: "", component: () => import("pages/EssaysPage.vue") },
+      { path: ":slug", component: () => import("pages/EssayPage.vue") },
     ],
   },
 

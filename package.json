@@ -6,7 +6,7 @@
   "author": "hoangnh",
   "private": true,
   "scripts": {
-    "lint": "eslint --ext .js,.vue ./",
+    "lint": "eslint .",
     "format": "prettier --write \"**/*.{js,vue,scss,html,md,json}\" --ignore-path .gitignore",
     "test": "echo \"No test specified\" && exit 0",
     "dev": "quasar dev",
@@ -16,9 +16,10 @@
   },
   "dependencies": {
     "@quasar/extras": "^1.17.0",
-    "better-sqlite3": "^12.4.6",
     "cors": "^2.8.5",
+    "ev-emitter": "^2.1.2",
     "express": "^5.1.0",
+    "pg": "^8.20.0",
     "quasar": "^2.19.1",
     "three": "^0.181.2",
     "vue": "^3.5.25",

@@ -1,5 +1,8 @@
+import * as THREE from "three";
+
 export function initLandingPage() {
   let isDisposed = false;
+
   class EffectShell {
     constructor(container = document.body, itemsWrapper = null) {
       this.container = container;
@@ -281,7 +284,7 @@ export function initLandingPage() {
     init() {
       this.position = new THREE.Vector3(0, 0, 0);
       this.scale = new THREE.Vector3(1, 1, 1);
-      this.geometry = new THREE.PlaneBufferGeometry(1, 1, 32, 32);
+      this.geometry = new THREE.PlaneGeometry(1, 1, 32, 32);
       this.uniforms = {
         uTexture: {
           value: null,
@@ -798,7 +801,7 @@ export function initLandingPage() {
     lastScroll = docScroll;
     // Initialize the Smooth Scrolling
     smoothScroll = new SmoothScroll();
-    const container = document.body;
+    const container = mainElement || document.body;
 
     const itemsWrappers = document.querySelectorAll(".grid");
     itemsWrappers.forEach((itemsWrapper) => {

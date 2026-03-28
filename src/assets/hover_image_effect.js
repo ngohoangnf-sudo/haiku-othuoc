@@ -1,9 +1,13 @@
+import * as THREE from "three";
+
 export function initHoverImageEffects({
   container = document.querySelector("main"),
   foreground = container?.querySelector?.("[data-scroll]") || null,
   wrappers = [],
   strength = 0.22,
 } = {}) {
+  const tween = globalThis.TweenLite;
+  const ease = globalThis.Power4;
   const items = wrappers
     .filter(Boolean)
     .map((wrapper) => ({
@@ -15,8 +19,8 @@ export function initHoverImageEffects({
   if (
     !items.length ||
     typeof window === "undefined" ||
-    typeof THREE === "undefined" ||
-    typeof TweenLite === "undefined"
+    !tween ||
+    !ease
   ) {
     return () => {};
   }
@@ -111,7 +115,7 @@ export function initHoverImageEffects({
       );
       this.camera.position.set(0, 0, 9);
 
-      this.geometry = new THREE.PlaneBufferGeometry(1, 1, 32, 32);
+      this.geometry = new THREE.PlaneGeometry(1, 1, 32, 32);
       this.uniforms = {
         uTexture: { value: null },
         uOffset: { value: new THREE.Vector2(0, 0) },
@@ -323,10 +327,10 @@ export function initHoverImageEffects({
         this.plane.visible = true;
         this.onMove(item, event);
 
-        TweenLite.killTweensOf(this.uniforms.uAlpha);
-        TweenLite.to(this.uniforms.uAlpha, 0.9, {
+        tween.killTweensOf(this.uniforms.uAlpha);
+        tween.to(this.uniforms.uAlpha, 0.9, {
           value: 0.92,
-          ease: Power4.easeOut,
+          ease: ease.easeOut,
           onUpdate: () => this.requestRender(),
         });
 
@@ -341,10 +345,10 @@ export function initHoverImageEffects({
 
       this.isVisible = false;
       this.currentItem = null;
-      TweenLite.killTweensOf(this.uniforms.uAlpha);
-      TweenLite.to(this.uniforms.uAlpha, 0.5, {
+      tween.killTweensOf(this.uniforms.uAlpha);
+      tween.to(this.uniforms.uAlpha, 0.5, {
         value: 0,
-        ease: Power4.easeOut,
+        ease: ease.easeOut,
         onUpdate: () => this.requestRender(),
         onComplete: () => {
           if (!this.isVisible) {
@@ -369,11 +373,11 @@ export function initHoverImageEffects({
       const y = this.pointer.y.map(-1, 1, -viewSize.height / 2, viewSize.height / 2);
 
       this.target.set(x, y, 0);
-      TweenLite.killTweensOf(this.plane.position);
-      TweenLite.to(this.plane.position, 1, {
+      tween.killTweensOf(this.plane.position);
+      tween.to(this.plane.position, 1, {
         x,
         y,
-        ease: Power4.easeOut,
+        ease: ease.easeOut,
         onUpdate: () => {
           const offset = this.plane.position
             .clone()
@@ -404,8 +408,8 @@ export function initHoverImageEffects({
         this.frameId = 0;
       }
 
-      TweenLite.killTweensOf(this.plane.position);
-      TweenLite.killTweensOf(this.uniforms.uAlpha);
+      tween.killTweensOf(this.plane.position);
+      tween.killTweensOf(this.uniforms.uAlpha);
 
       this.geometry.dispose();
       this.material.dispose();

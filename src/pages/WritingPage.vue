@@ -2,15 +2,18 @@
   <div class="write-page">
     <section class="write-page__composer">
       <div class="write-page__intro">
-        <h1 class="write-page__heading">Viết & đăng bài</h1>
-        <p class="write-page__lead">
-          Nhập từng dòng haiku, chọn tác giả và phân loại. Bài sẽ được lưu trên máy chủ.
+        <h1 class="write-page__heading page-reading-h2">Viết & đăng bài</h1>
+        <p v-if="!canEdit" class="write-page__status page-reading-copy">
+          Bạn đang ở quyền Viewer. Hãy <router-link to="/login">đăng nhập</router-link> bằng tài khoản Editor hoặc Admin để đăng và chỉnh sửa bài.
         </p>
-        <p v-if="error" class="write-page__status write-page__status--error">{{ error }}</p>
-        <p v-else-if="loading" class="write-page__status">Đang tải danh sách...</p>
+        <p v-if="editingPostId" class="write-page__status page-reading-copy">
+          Đang chỉnh sửa một bài đã đăng.
+        </p>
+        <p v-if="error" class="write-page__status write-page__status--error page-reading-copy">{{ error }}</p>
+        <p v-else-if="loading" class="write-page__status page-reading-copy">Đang tải danh sách...</p>
       </div>
 
-      <form class="write-form" @submit.prevent="submitPost">
+      <form v-if="canEdit" class="write-form" @submit.prevent="submitPost">
         <label class="form-field">
           <span class="form-field__label">Tiêu đề</span>
           <input v-model="form.title" class="input" placeholder="Tiêu đề bài" />
@@ -32,34 +35,64 @@
           <input v-model="form.summary" class="input" placeholder="1-2 câu mô tả ngắn" />
         </label>
         <label class="form-field">
-          <span class="form-field__label">Ảnh (tùy chọn)</span>
-          <input v-model="form.image" class="input" placeholder="URL ảnh hoặc tên file trong assets" />
+          <span class="form-field__label">URL ảnh (tùy chọn)</span>
+          <input v-model="form.image" class="input" placeholder="https://... hoặc data URL" />
+        </label>
+        <label class="form-field">
+          <span class="form-field__label">Tải ảnh trực tiếp (tùy chọn)</span>
+          <input
+            ref="imageInput"
+            class="input input--file"
+            type="file"
+            accept="image/*"
+            @change="handleImageUpload"
+          />
+          <span v-if="uploadedImageName" class="form-field__hint">{{ uploadedImageName }}</span>
         </label>
         <label class="form-field form-field--wide">
-          <span class="form-field__label">Nội dung (mỗi dòng haiku cách nhau bởi xuống dòng)</span>
+          <span class="form-field__label">Nội dung</span>
           <textarea
             v-model="form.linesInput"
             class="input"
             rows="4"
-            placeholder="Ví dụ:\nBỏ lên chiếc quạt nhỏ\nTừ Phú Sĩ gửi đi ngọn gió\nMột chút quà Edo"
+            placeholder="Bỏ lên chiếc quạt nhỏ
+Từ Phú Sĩ gửi đi ngọn gió
+Một chút quà Edo"
           ></textarea>
         </label>
-        <button class="submit-btn" type="submit">Đăng bài</button>
-        <p v-if="message" class="form-feedback">{{ message }}</p>
+        <div class="write-form__actions">
+          <button class="submit-btn" type="submit">
+            {{ editingPostId ? "Lưu chỉnh sửa" : "Đăng bài" }}
+          </button>
+          <button
+            v-if="editingPostId"
+            class="submit-btn submit-btn--ghost"
+            type="button"
+            @click="cancelEditing"
+          >
+            Hủy chỉnh sửa
+          </button>
+        </div>
+        <p v-if="message" class="form-feedback page-reading-copy">{{ message }}</p>
       </form>
     </section>
 
     <section v-if="posts.length" class="write-page__previews">
       <div class="write-page__previews-head">
-        <h2 class="write-page__subheading">Bài đã đăng</h2>
-        <p class="write-page__subcopy">{{ posts.length }} bài hiện có trong hệ thống.</p>
+        <h2 class="write-page__subheading page-reading-h3">Bài đã đăng</h2>
+        <p class="write-page__subcopy page-reading-copy">{{ posts.length }} bài hiện có trong hệ thống.</p>
       </div>
 
       <div class="write-page__preview-list">
-        <article v-for="poem in posts" :key="poem.id" class="write-page__preview">
-          <h3 class="write-page__preview-title">{{ poem.title || "Haiku" }}</h3>
+        <article
+          v-for="poem in posts"
+          :key="poem.id"
+          class="write-page__preview"
+          :class="{ 'write-page__preview--active': editingPostId === poem.id }"
+        >
+          <h3 v-if="poem.title" class="write-page__preview-title page-reading-h3">{{ poem.title }}</h3>
           <div class="write-page__preview-body">
-            <p v-for="(line, i) in poem.lines" :key="i" class="write-page__preview-line">{{ line }}</p>
+            <p v-for="(line, i) in poem.lines" :key="i" class="write-page__preview-line page-reading-copy">{{ line }}</p>
           </div>
           <div class="write-page__preview-meta">
             <router-link :to="'/authors/' + poem.authorSlug" class="write-page__preview-author">
@@ -68,6 +101,14 @@
             <router-link :to="'/post/' + poem.id" class="write-page__preview-link">
               Xem bài · {{ formatDate(poem.publishedAt) }}
             </router-link>
+          </div>
+          <div v-if="canEdit" class="write-page__preview-actions">
+            <button class="write-page__preview-action" type="button" @click="startEditing(poem)">
+              {{ editingPostId === poem.id ? "Đang sửa" : "Sửa" }}
+            </button>
+            <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removePost(poem)">
+              Xóa
+            </button>
           </div>
         </article>
       </div>
@@ -78,6 +119,7 @@
 <script>
 import { computed, defineComponent, onMounted, reactive, ref } from "vue";
 import blogStore from "src/stores/blogStore";
+import authStore from "src/stores/authStore";
 
 const CATEGORY_OPTIONS = [
   { value: "jp", label: "Haiku Nhật" },
@@ -89,9 +131,12 @@ export default defineComponent({
   name: "WritingPage",
   setup() {
     onMounted(() => {
+      authStore.ensureSession();
       blogStore.loadPosts();
     });
 
+    const imageInput = ref(null);
+    const editingPostId = ref("");
     const form = reactive({
       title: "",
       author: "",
@@ -102,23 +147,97 @@ export default defineComponent({
     });
 
     const message = ref("");
+    const uploadedImageName = ref("");
 
     const posts = computed(() => blogStore.state.posts);
+    const canEdit = computed(() => authStore.canEdit());
     const categoryOptions = CATEGORY_OPTIONS;
 
     const resetForm = () => {
+      editingPostId.value = "";
       form.title = "";
       form.author = "";
       form.category = "vi";
       form.summary = "";
       form.image = "";
       form.linesInput = "";
+      uploadedImageName.value = "";
+
+      if (imageInput.value) {
+        imageInput.value.value = "";
+      }
+    };
+
+    const applyPostToForm = (post) => {
+      editingPostId.value = post.id;
+      form.title = post.title || "";
+      form.author = post.author || "";
+      form.category = post.category || "vi";
+      form.summary = post.summary || "";
+      form.image = post.image || "";
+      form.linesInput = Array.isArray(post.lines) ? post.lines.join("\n") : "";
+      uploadedImageName.value = post.image ? "Đang dùng ảnh hiện tại" : "";
+      message.value = `Đang chỉnh sửa bài của ${post.author}.`;
+
+      if (imageInput.value) {
+        imageInput.value.value = "";
+      }
+    };
+
+    const startEditing = (post) => {
+      applyPostToForm(post);
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
+    const cancelEditing = () => {
+      message.value = "Đã hủy chế độ chỉnh sửa.";
+      resetForm();
+    };
+
+    const readFileAsDataUrl = (file) =>
+      new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ""));
+        reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
+        reader.readAsDataURL(file);
+      });
+
+    const handleImageUpload = async (event) => {
+      const file = event.target?.files?.[0];
+      if (!file) {
+        uploadedImageName.value = "";
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        message.value = "Vui lòng chọn một file ảnh hợp lệ.";
+        uploadedImageName.value = "";
+        event.target.value = "";
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        message.value = "Ảnh quá lớn. Hãy chọn ảnh nhỏ hơn 5MB.";
+        uploadedImageName.value = "";
+        event.target.value = "";
+        return;
+      }
+
+      try {
+        form.image = await readFileAsDataUrl(file);
+        uploadedImageName.value = file.name;
+        message.value = `Đã tải ảnh "${file.name}".`;
+      } catch (err) {
+        message.value = "Không đọc được file ảnh. Thử lại.";
+        uploadedImageName.value = "";
+        event.target.value = "";
+      }
     };
 
     const submitPost = async () => {
       message.value = "";
       const lines = form.linesInput
-        .split("\n")
+        .split(/\r?\n/)
         .map((line) => line.trim())
         .filter(Boolean);
 
@@ -128,19 +247,52 @@ export default defineComponent({
       }
 
       try {
-        const post = await blogStore.addPost({
+        const payload = {
           title: form.title,
           author: form.author,
           category: form.category,
           summary: form.summary,
           image: form.image,
           lines,
-        });
+        };
 
-        message.value = `Đã đăng "${post.title}" của ${post.author}.`;
+        const post = editingPostId.value
+          ? await blogStore.updatePost(editingPostId.value, payload)
+          : await blogStore.addPost(payload);
+
+        message.value = editingPostId.value
+          ? `Đã cập nhật bài của ${post.author}.`
+          : post.title
+            ? `Đã đăng "${post.title}" của ${post.author}.`
+            : `Đã đăng bài mới của ${post.author}.`;
         resetForm();
       } catch (err) {
-        message.value = "Không đăng được bài. Thử lại sau.";
+        message.value = editingPostId.value
+          ? "Không cập nhật được bài. Thử lại sau."
+          : "Không đăng được bài. Thử lại sau.";
+      }
+    };
+
+    const removePost = async (post) => {
+      const confirmed = window.confirm(
+        post.title
+          ? `Xóa bài "${post.title}"?`
+          : `Xóa bài của ${post.author}?`
+      );
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await blogStore.deletePost(post.id);
+        if (editingPostId.value === post.id) {
+          resetForm();
+        }
+        message.value = post.title
+          ? `Đã xóa "${post.title}".`
+          : `Đã xóa bài của ${post.author}.`;
+      } catch (err) {
+        message.value = "Không xóa được bài. Thử lại sau.";
       }
     };
 
@@ -163,10 +315,18 @@ export default defineComponent({
 
     return {
       form,
+      imageInput,
+      editingPostId,
       posts,
+      canEdit,
       categoryOptions,
       submitPost,
+      startEditing,
+      cancelEditing,
+      removePost,
       message,
+      uploadedImageName,
+      handleImageUpload,
       formatDate,
       loading,
       error,
@@ -199,7 +359,6 @@ export default defineComponent({
   margin: 0;
   font-family: var(--font-title);
   font-weight: var(--font-weight-title);
-  font-size: clamp(2.6rem, 7vw, 5.8rem);
   line-height: 0.96;
   color: var(--color-title);
 }
@@ -209,8 +368,6 @@ export default defineComponent({
 .write-page__subcopy {
   margin: 1.25rem 0 0;
   max-width: 46rem;
-  font-size: 1.05rem;
-  line-height: 1.7;
   color: var(--color-description);
 }
 
@@ -246,6 +403,14 @@ export default defineComponent({
   color: var(--color-description);
 }
 
+.form-field__hint {
+  display: block;
+  margin-top: 0.45rem;
+  color: var(--color-description);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
 .form-field--wide {
   grid-column: 1 / -1;
 }
@@ -262,6 +427,10 @@ export default defineComponent({
   font-size: 1rem;
 }
 
+.input--file {
+  padding: 0.65rem 0.8rem;
+}
+
 .write-form textarea {
   min-height: 11rem;
   resize: vertical;
@@ -274,7 +443,6 @@ export default defineComponent({
 }
 
 .submit-btn {
-  grid-column: 1 / -1;
   padding: 0.75rem 1rem;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06);
@@ -282,6 +450,21 @@ export default defineComponent({
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
+}
+
+.write-form__actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+}
+
+.write-form__actions .submit-btn {
+  min-width: 11rem;
+}
+
+.submit-btn--ghost {
+  background: transparent;
 }
 
 .submit-btn:hover {
@@ -308,7 +491,6 @@ export default defineComponent({
   margin: 0;
   font-family: var(--font-title);
   font-weight: var(--font-weight-title);
-  font-size: clamp(1.8rem, 4vw, 3rem);
   color: var(--color-title);
 }
 
@@ -333,11 +515,15 @@ export default defineComponent({
   align-content: start;
 }
 
+.write-page__preview--active {
+  border-color: rgba(221, 82, 90, 0.45);
+  background: rgba(221, 82, 90, 0.06);
+}
+
 .write-page__preview-title {
   margin: 0;
   font-family: var(--font-title);
   font-weight: var(--font-weight-title);
-  font-size: clamp(2rem, 5vw, 3.6rem);
   line-height: 0.96;
   color: var(--color-title);
 }
@@ -365,11 +551,35 @@ export default defineComponent({
 .write-page__preview-link {
   color: var(--color-description);
   text-decoration: none;
+  font-size: var(--page-reading-copy-size);
+  line-height: var(--page-reading-copy-line-height);
 }
 
 .write-page__preview-link:hover,
 .write-page__preview-author:hover {
   color: var(--color-title);
+}
+
+.write-page__preview-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.write-page__preview-action {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-text);
+  border-radius: 999px;
+  padding: 0.55rem 0.95rem;
+  cursor: pointer;
+  font: inherit;
+  line-height: 1;
+}
+
+.write-page__preview-action--danger {
+  border-color: rgba(221, 82, 90, 0.28);
+  color: #f0b9b0;
 }
 
 @media screen and (max-width: 56em) {
