@@ -407,7 +407,15 @@ export function initLandingPage() {
       let imageRatio =
         this.currentItem.img.naturalWidth / this.currentItem.img.naturalHeight;
       const baseScale = 4;
-      this.scale = new THREE.Vector3(imageRatio * baseScale, baseScale, 1);
+      const poemRect = this.currentItem.element.getBoundingClientRect();
+      const poemWidthInView =
+        (poemRect.width / this.viewport.width) * this.viewSize.width;
+      const maxWidth = poemWidthInView * 1.5;
+      const targetWidth = imageRatio * baseScale;
+      const width = Math.min(targetWidth, maxWidth);
+      const height = width / imageRatio;
+
+      this.scale = new THREE.Vector3(width, height, 1);
       this.uniforms.uTexture.value = this.currentItem.texture;
       this.plane.scale.copy(this.scale);
     }

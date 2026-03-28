@@ -21,10 +21,8 @@
           draggable="false"
           class="link w-inline-block -col-or-link"
         >
-          <p>đường phố không hắt bóng</p>
-          <p>dưới mắt đèn đường hỏng</p>
-          <p>chỗ trú loài chim đêm</p>
-          <img class="" :src="images._7" alt="img7" />
+          <p v-for="(line, index) in featuredPoem.lines" :key="index">{{ line }}</p>
+          <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" />
         </a>
       </div>
     </div>
@@ -80,7 +78,7 @@
 </template>
 
 <script>
-import { defineComponent } from "vue";
+import { defineComponent, nextTick } from "vue";
 import _1 from "assets/1.jpg";
 import _2 from "assets/2.jpg";
 import _3 from "assets/3.jpg";
@@ -91,10 +89,13 @@ import "assets/imagesloaded.pkgd.min.js";
 import { initLandingPage } from "assets/landing_page.js";
 import "assets/js/TweenLite.min.js";
 import "assets/js/Math.js";
+import { API_BASE, resolveMediaUrl } from "src/utils/runtime";
 
 export default defineComponent({
   name: "LandingPage",
-  mounted() {
+  async mounted() {
+    await this.fetchFeaturedPoem();
+    await nextTick();
     this.cleanupLandingPage = initLandingPage();
   },
   beforeUnmount() {
@@ -124,6 +125,10 @@ export default defineComponent({
   data() {
     return {
       cleanupLandingPage: null,
+      featuredPoem: {
+        lines: ["đường phố không hắt bóng", "dưới mắt đèn đường hỏng", "chỗ trú loài chim đêm"],
+        image: _7,
+      },
       images: {
         _1,
         _2,
@@ -133,6 +138,28 @@ export default defineComponent({
         _7,
       },
     };
+  },
+  methods: {
+    async fetchFeaturedPoem() {
+      try {
+        const res = await fetch(`${API_BASE}/posts/random`);
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (!data?.image || !Array.isArray(data?.lines) || !data.lines.length) {
+          return;
+        }
+
+        this.featuredPoem = {
+          lines: data.lines,
+          image: resolveMediaUrl(data.image),
+        };
+      } catch (err) {
+        console.error("Không tải được bài thơ landing", err);
+      }
+    },
   },
 });
 </script>

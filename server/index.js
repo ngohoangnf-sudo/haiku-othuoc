@@ -312,14 +312,41 @@ app.get("/api/admin/activity", requireAdmin, async (req, res) => {
 
 app.get("/api/posts", async (req, res) => {
   try {
-    const posts = await db.getAllPosts({
+    const filters = {
       category: req.query.category,
       authorSlug: req.query.authorSlug,
-    });
+      search: req.query.search,
+    };
+    const hasPagination =
+      req.query.page !== undefined || req.query.pageSize !== undefined;
+
+    if (hasPagination) {
+      const pagedPosts = await db.getPagedPosts(filters, {
+        page: req.query.page,
+        pageSize: req.query.pageSize,
+        seed: req.query.seed,
+      });
+      return res.json(pagedPosts);
+    }
+
+    const posts = await db.getAllPosts(filters);
     res.json(posts);
   } catch (err) {
     console.error("Lỗi lấy posts", err);
     res.status(500).json({ message: "Không lấy được danh sách bài viết" });
+  }
+});
+
+app.get("/api/posts/random", async (_req, res) => {
+  try {
+    const post = await db.getRandomPostWithImage();
+    if (!post) {
+      return res.status(404).json({ message: "Không tìm thấy bài có ảnh" });
+    }
+    res.json(post);
+  } catch (err) {
+    console.error("Lỗi lấy bài ngẫu nhiên có ảnh", err);
+    res.status(500).json({ message: "Không lấy được bài ngẫu nhiên" });
   }
 });
 
@@ -459,11 +486,33 @@ app.get("/api/authors", async (_req, res) => {
 
 app.get("/api/essays", async (req, res) => {
   try {
-    const essays = await db.getAllEssays({
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const canManageEssays = ["editor", "admin"].includes(req.auth.role);
+    const resolvedStatus =
+      canManageEssays && requestedStatus === "all"
+        ? null
+        : requestedStatus && requestedStatus !== "all"
+          ? requestedStatus
+          : "published";
+
+    const filters = {
       authorSlug: req.query.authorSlug,
       tagSlug: req.query.tagSlug,
-      status: "published",
-    });
+      status: resolvedStatus,
+      search: req.query.search,
+    };
+    const hasPagination =
+      req.query.page !== undefined || req.query.pageSize !== undefined;
+
+    if (hasPagination) {
+      const pagedEssays = await db.getPagedEssays(filters, {
+        page: req.query.page,
+        pageSize: req.query.pageSize,
+      });
+      return res.json(pagedEssays);
+    }
+
+    const essays = await db.getAllEssays(filters);
     res.json(essays);
   } catch (err) {
     console.error("Lỗi lấy essays", err);
@@ -471,9 +520,32 @@ app.get("/api/essays", async (req, res) => {
   }
 });
 
+app.get("/api/essay-tags", async (req, res) => {
+  try {
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const canManageEssays = ["editor", "admin"].includes(req.auth.role);
+    const resolvedStatus =
+      canManageEssays && requestedStatus === "all"
+        ? null
+        : requestedStatus && requestedStatus !== "all"
+          ? requestedStatus
+          : "published";
+
+    const tags = await db.getEssayTags({
+      status: resolvedStatus,
+    });
+    res.json(tags);
+  } catch (err) {
+    console.error("Lỗi lấy essay tags", err);
+    res.status(500).json({ message: "Không lấy được danh sách tag bài luận" });
+  }
+});
+
 app.get("/api/essays/:slug", async (req, res) => {
   try {
-    const essay = await db.getEssayBySlug(req.params.slug);
+    const essay = await db.getEssayBySlug(req.params.slug, {
+      status: ["editor", "admin"].includes(req.auth.role) ? null : "published",
+    });
     if (!essay) {
       return res.status(404).json({ message: "Không tìm thấy bài luận" });
     }
@@ -719,6 +791,266 @@ const SEED_POSTS = [
     updatedAt: "2023-05-09T00:00:00.000Z",
   },
   {
+    id: "seed-basho-5",
+    title: "Ao cũ",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Ao xưa tĩnh lặng", "một con ếch vừa nhảy xuống", "vang tiếng nước xao"],
+    image: "",
+    summary: "Bài haiku nổi tiếng nhất của Basho về ao cũ và tiếng nước.",
+    publishedAt: "2023-04-01",
+    createdAt: "2023-04-01T00:00:00.000Z",
+    updatedAt: "2023-04-01T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-6",
+    title: "Cành khô",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Trên cành khô héo", "một con quạ đang đậu yên", "chiều thu rất cũ"],
+    image: "",
+    summary: "Hình ảnh quạ đậu trên cành khô trong buổi chiều thu.",
+    publishedAt: "2023-04-08",
+    createdAt: "2023-04-08T00:00:00.000Z",
+    updatedAt: "2023-04-08T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-7",
+    title: "Trọ dưới giàn tử đằng",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Lữ khách mỏi mệt", "ngã mình vào quán trọ nhỏ", "giàn tử đằng rơi"],
+    image: "",
+    summary: "Khoảnh khắc dừng chân của lữ khách Basho dưới giàn hoa tử đằng.",
+    publishedAt: "2023-04-15",
+    createdAt: "2023-04-15T00:00:00.000Z",
+    updatedAt: "2023-04-15T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-8",
+    title: "Hạt sương cỏ hagi",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Cỏ hagi lay nhẹ", "không đánh rơi một hạt nào", "sương trong ban sớm"],
+    image: "",
+    summary: "Một cái nhìn cực nhỏ và tinh của Basho vào hạt sương trên cỏ.",
+    publishedAt: "2023-04-22",
+    createdAt: "2023-04-22T00:00:00.000Z",
+    updatedAt: "2023-04-22T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-9",
+    title: "Tuyết đầu mùa",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Tuyết đầu mùa tới", "vừa đủ làm cong xuống khẽ", "lá thủy tiên xanh"],
+    image: "",
+    summary: "Basho chỉ cần một chạm rất nhỏ của tuyết để làm hiện ra cả mùa.",
+    publishedAt: "2023-04-29",
+    createdAt: "2023-04-29T00:00:00.000Z",
+    updatedAt: "2023-04-29T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-10",
+    title: "Cổng chùa Miidera",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Ánh trăng đêm nay", "giá mà gõ được một tiếng", "cổng chùa Miidera"],
+    image: "",
+    summary: "Một niềm mong ngóng rất Basho trước cảnh chùa và trăng.",
+    publishedAt: "2023-05-06",
+    createdAt: "2023-05-06T00:00:00.000Z",
+    updatedAt: "2023-05-06T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-11",
+    title: "Giấc mộng đồng hoang",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Nằm bệnh dọc đường", "mộng ta vẫn còn rong ruổi", "qua những đồng hoang"],
+    image: "",
+    summary: "Một trong những bài cuối cùng của Basho, về giấc mộng vẫn tiếp tục lên đường.",
+    publishedAt: "2023-05-13",
+    createdAt: "2023-05-13T00:00:00.000Z",
+    updatedAt: "2023-05-13T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-12",
+    title: "Cỏ mùa hạ",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Cỏ mùa hè rậm", "dấu tích duy nhất còn lại", "giấc mơ tráng sĩ"],
+    image: "",
+    summary: "Basho nhìn đám cỏ mùa hè như tàn dư của những mộng lớn đã qua.",
+    publishedAt: "2023-05-20",
+    createdAt: "2023-05-20T00:00:00.000Z",
+    updatedAt: "2023-05-20T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-13",
+    title: "Biển tối và tiếng vịt",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Biển chiều sẫm xuống", "tiếng vịt trời đâu thoáng lại", "trắng một khoảng xa"],
+    image: "",
+    summary: "Một trường nhìn rất thưa, rất lạnh của Basho trên mặt biển chiều.",
+    publishedAt: "2023-05-27",
+    createdAt: "2023-05-27T00:00:00.000Z",
+    updatedAt: "2023-05-27T00:00:00.000Z",
+  },
+  {
+    id: "seed-basho-14",
+    title: "Sado và ngân hà",
+    author: "Basho",
+    authorSlug: "basho",
+    category: "jp",
+    lines: ["Biển động đêm nay", "trải dần về phía Sado", "một dải ngân hà"],
+    image: "",
+    summary: "Một Basho rộng lớn hơn thường lệ, nhìn từ biển dữ lên dải ngân hà.",
+    publishedAt: "2023-06-03",
+    createdAt: "2023-06-03T00:00:00.000Z",
+    updatedAt: "2023-06-03T00:00:00.000Z",
+  },
+  {
+    id: "seed-buson-1",
+    title: "Hoa lê dưới trăng",
+    author: "Yosa Buson",
+    authorSlug: "yosa-buson",
+    category: "jp",
+    lines: ["Hoa lê nở trắng", "một người đàn bà dưới trăng", "đọc lá thư xa"],
+    image: "",
+    summary: "Một khoảnh khắc tinh tế của Buson giữa hoa lê và ánh trăng.",
+    publishedAt: "2023-04-03",
+    createdAt: "2023-04-03T00:00:00.000Z",
+    updatedAt: "2023-04-03T00:00:00.000Z",
+  },
+  {
+    id: "seed-ryota-1",
+    title: "Sau mưa tháng sáu",
+    author: "Oshima Ryota",
+    authorSlug: "oshima-ryota",
+    category: "jp",
+    lines: ["Những cơn mưa tháng sáu", "rồi một buổi chiều kín đáo", "trăng qua hàng thông"],
+    image: "",
+    summary: "Ryota ghi lại sự chuyển mùa rất nhẹ sau những trận mưa dài.",
+    publishedAt: "2023-04-10",
+    createdAt: "2023-04-10T00:00:00.000Z",
+    updatedAt: "2023-04-10T00:00:00.000Z",
+  },
+  {
+    id: "seed-ranko-1",
+    title: "Lùm xuân ngủ",
+    author: "Takakuma Ranko",
+    authorSlug: "takakuma-ranko",
+    category: "jp",
+    lines: ["Lùm cây mùa xuân", "cả loài chim săn chim nữa", "cũng đang ngủ yên"],
+    image: "",
+    summary: "Cả kẻ săn lẫn con mồi cùng chìm vào giấc ngủ mùa xuân.",
+    publishedAt: "2023-04-17",
+    createdAt: "2023-04-17T00:00:00.000Z",
+    updatedAt: "2023-04-17T00:00:00.000Z",
+  },
+  {
+    id: "seed-chora-1",
+    title: "Ông cóc nhường đường",
+    author: "Miura Chora",
+    authorSlug: "miura-chora",
+    category: "jp",
+    lines: ["Tránh lối cho tôi", "để tôi trồng mấy bụi tre", "ông cóc già ơi"],
+    image: "",
+    summary: "Chora vừa dí dỏm vừa thân mật khi nói với con cóc bên vườn tre.",
+    publishedAt: "2023-04-24",
+    createdAt: "2023-04-24T00:00:00.000Z",
+    updatedAt: "2023-04-24T00:00:00.000Z",
+  },
+  {
+    id: "seed-kito-1",
+    title: "Sẻ nhỏ không mẹ",
+    author: "Tahai Kito",
+    authorSlug: "tahai-kito",
+    category: "jp",
+    lines: ["Lại đây với ta", "mình cùng chơi với nhau nhé", "sẻ nhỏ không mẹ"],
+    image: "",
+    summary: "Một tiếng gọi dịu dàng của Kito dành cho chú sẻ mồ côi.",
+    publishedAt: "2023-05-01",
+    createdAt: "2023-05-01T00:00:00.000Z",
+    updatedAt: "2023-05-01T00:00:00.000Z",
+  },
+  {
+    id: "seed-issa-1",
+    title: "Hoa gai quê cũ",
+    author: "Kobayashi Issa",
+    authorSlug: "kobayashi-issa",
+    category: "jp",
+    lines: ["Quê cũ của tôi", "đêm chạm vào đâu cũng thấy", "hoa gai đang nở"],
+    image: "",
+    summary: "Issa trở về quê cũ và gặp lại những gai nhọn của ký ức.",
+    publishedAt: "2023-05-16",
+    createdAt: "2023-05-16T00:00:00.000Z",
+    updatedAt: "2023-05-16T00:00:00.000Z",
+  },
+  {
+    id: "seed-sodo-1",
+    title: "Lều xuân trống",
+    author: "Yamaguchi Sodo",
+    authorSlug: "yamaguchi-sodo",
+    category: "jp",
+    lines: ["Túp lều mùa xuân", "quả thật chẳng có gì cả", "mà cũng đủ đầy"],
+    image: "",
+    summary: "Sodo đưa sự trống rỗng của căn lều thành một cảm giác viên mãn.",
+    publishedAt: "2023-05-23",
+    createdAt: "2023-05-23T00:00:00.000Z",
+    updatedAt: "2023-05-23T00:00:00.000Z",
+  },
+  {
+    id: "seed-kikaku-1",
+    title: "Bóng thông trên chiếu",
+    author: "Enomoto Kikaku",
+    authorSlug: "enomoto-kikaku",
+    category: "jp",
+    lines: ["Trăng rằm sáng quá", "trên chiếu tatami bỗng hiện", "bóng của hàng thông"],
+    image: "",
+    summary: "Kikaku chạm vào vẻ đẹp tĩnh lặng của bóng thông dưới trăng.",
+    publishedAt: "2023-05-30",
+    createdAt: "2023-05-30T00:00:00.000Z",
+    updatedAt: "2023-05-30T00:00:00.000Z",
+  },
+  {
+    id: "seed-joso-1",
+    title: "Không còn gì nữa",
+    author: "Naito Joso",
+    authorSlug: "naito-joso",
+    category: "jp",
+    lines: ["Núi cùng đồng nội", "đều bị tuyết lấy mất rồi", "chẳng còn lại gì"],
+    image: "",
+    summary: "Joso nén toàn bộ phong cảnh vào một khoảng trắng do tuyết phủ kín.",
+    publishedAt: "2023-06-06",
+    createdAt: "2023-06-06T00:00:00.000Z",
+    updatedAt: "2023-06-06T00:00:00.000Z",
+  },
+  {
+    id: "seed-chiyo-ni-1",
+    title: "Triêu nhan quấn gầu",
+    author: "Chiyo-ni",
+    authorSlug: "chiyo-ni",
+    category: "jp",
+    lines: ["Triêu nhan buổi sớm", "quấn quanh cả tay gầu nước", "đành xin nước bên"],
+    image: "",
+    summary: "Chiyo-ni giữ nguyên vẻ đẹp mong manh của hoa mà chấp nhận đi xin nước.",
+    publishedAt: "2023-06-13",
+    createdAt: "2023-06-13T00:00:00.000Z",
+    updatedAt: "2023-06-13T00:00:00.000Z",
+  },
+  {
     id: "seed-hiep-1",
     title: "Mùa rêu xanh",
     author: "Nguyễn Vũ Hiệp",
@@ -870,6 +1202,31 @@ function assignVietnameseSeedImages(posts = []) {
 }
 
 const seededPosts = assignVietnameseSeedImages(SEED_POSTS);
+const SUPPLEMENTAL_JP_SEED_POST_IDS = new Set([
+  "seed-basho-5",
+  "seed-basho-6",
+  "seed-basho-7",
+  "seed-basho-8",
+  "seed-basho-9",
+  "seed-basho-10",
+  "seed-basho-11",
+  "seed-basho-12",
+  "seed-basho-13",
+  "seed-basho-14",
+  "seed-buson-1",
+  "seed-ryota-1",
+  "seed-ranko-1",
+  "seed-chora-1",
+  "seed-kito-1",
+  "seed-issa-1",
+  "seed-sodo-1",
+  "seed-kikaku-1",
+  "seed-joso-1",
+  "seed-chiyo-ni-1",
+]);
+const supplementalJapaneseSeedPosts = seededPosts.filter((post) =>
+  SUPPLEMENTAL_JP_SEED_POST_IDS.has(post.id)
+);
 const seededVietnameseImageMap = Object.fromEntries(
   seededPosts
     .filter((post) => post.category === "vi" && post.image)
@@ -966,6 +1323,7 @@ async function startServer() {
   await db.init();
   await ensureBootstrapAdmin();
   await db.seedIfEmpty(seededPosts);
+  await db.seedPostsIfMissing(supplementalJapaneseSeedPosts);
   await db.seedEssaysIfEmpty(SEED_ESSAYS);
   await db.assignImagesIfMissing(seededVietnameseImageMap);
 

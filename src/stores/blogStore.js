@@ -5,6 +5,7 @@ import authStore from "src/stores/authStore";
 const state = reactive({
   posts: [],
   essays: [],
+  essayTags: [],
   authors: [],
   loading: false,
   essaysLoading: false,
@@ -12,6 +13,7 @@ const state = reactive({
   essaysError: "",
   loaded: false,
   essaysLoaded: false,
+  essaysStatus: "published",
 });
 
 function setError(message = "") {
@@ -57,19 +59,68 @@ async function loadAuthors() {
   return state.authors;
 }
 
-async function loadEssays(force = false) {
+async function fetchPagedPosts(options = {}) {
+  const params = new URLSearchParams();
+
+  if (options.category) {
+    params.set("category", options.category);
+  }
+
+  if (options.authorSlug) {
+    params.set("authorSlug", options.authorSlug);
+  }
+
+  if (options.page !== undefined) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.pageSize !== undefined) {
+    params.set("pageSize", String(options.pageSize));
+  }
+
+  if (options.seed) {
+    params.set("seed", String(options.seed));
+  }
+
+  const query = params.toString();
+  const res = await fetch(`${API_BASE}/posts${query ? `?${query}` : ""}`);
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: Number(data?.total) || 0,
+    totalPages: Math.max(1, Number(data?.totalPages) || 1),
+    page: Math.max(1, Number(data?.page) || 1),
+    pageSize: Math.max(1, Number(data?.pageSize) || Number(options.pageSize) || 1),
+  };
+}
+
+async function loadEssays(options = {}) {
+  const force = typeof options === "boolean" ? options : Boolean(options.force);
+  const status =
+    typeof options === "object" && typeof options.status === "string" && options.status.trim()
+      ? options.status.trim()
+      : "published";
+
   if (state.essaysLoading) return state.essays;
-  if (state.essaysLoaded && !force) return state.essays;
+  if (state.essaysLoaded && state.essaysStatus === status && !force) return state.essays;
 
   state.essaysLoading = true;
   setEssaysError("");
 
   try {
-    const res = await fetch(`${API_BASE}/essays`);
+    const query = status && status !== "published" ? `?status=${encodeURIComponent(status)}` : "";
+    const res = await fetch(`${API_BASE}/essays${query}`, {
+      headers: authStore.getAuthHeaders(),
+    });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.essays = Array.isArray(data) ? data : [];
     state.essaysLoaded = true;
+    state.essaysStatus = status;
   } catch (err) {
     console.error("Không tải được bài luận", err);
     setEssaysError("Không tải được bài luận từ máy chủ.");
@@ -78,6 +129,75 @@ async function loadEssays(force = false) {
   }
 
   return state.essays;
+}
+
+async function fetchPagedEssays(options = {}) {
+  const params = new URLSearchParams();
+
+  if (options.authorSlug) {
+    params.set("authorSlug", options.authorSlug);
+  }
+
+  if (options.tagSlug) {
+    params.set("tagSlug", options.tagSlug);
+  }
+
+  if (options.status) {
+    params.set("status", options.status);
+  }
+
+  if (options.search) {
+    params.set("search", options.search);
+  }
+
+  if (options.page !== undefined) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.pageSize !== undefined) {
+    params.set("pageSize", String(options.pageSize));
+  }
+
+  const query = params.toString();
+  const res = await fetch(`${API_BASE}/essays${query ? `?${query}` : ""}`, {
+    headers: authStore.getAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: Number(data?.total) || 0,
+    totalPages: Math.max(1, Number(data?.totalPages) || 1),
+    page: Math.max(1, Number(data?.page) || 1),
+    pageSize: Math.max(1, Number(data?.pageSize) || Number(options.pageSize) || 1),
+  };
+}
+
+async function loadEssayTags(options = {}) {
+  const status =
+    typeof options === "object" && typeof options.status === "string" && options.status.trim()
+      ? options.status.trim()
+      : "published";
+
+  const query = status && status !== "published" ? `?status=${encodeURIComponent(status)}` : "";
+
+  try {
+    const res = await fetch(`${API_BASE}/essay-tags${query}`, {
+      headers: authStore.getAuthHeaders(),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    state.essayTags = Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error("Không tải được danh sách tag bài luận", err);
+    state.essayTags = [];
+  }
+
+  return state.essayTags;
 }
 
 async function fetchPostById(id) {
@@ -136,6 +256,7 @@ async function addEssay(essayInput) {
     }
     const data = await res.json();
     upsertEssay(data, true);
+    state.essaysStatus = data.status === "draft" ? "all" : state.essaysStatus;
     return data;
   } catch (err) {
     console.error("Không tạo được bài luận", err);
@@ -245,7 +366,16 @@ function getPostById(id) {
 }
 
 function getEssayBySlug(slug) {
-  return state.essays.find((essay) => essay.slug === slug);
+  const essay = state.essays.find((item) => item.slug === slug);
+  if (!essay) {
+    return undefined;
+  }
+
+  if (essay.status === "draft" && !authStore.canEdit()) {
+    return undefined;
+  }
+
+  return essay;
 }
 
 function getPostsByAuthorSlug(slug) {
@@ -284,7 +414,9 @@ async function fetchEssayBySlug(slug) {
   setEssaysError("");
 
   try {
-    const res = await fetch(`${API_BASE}/essays/${slug}`);
+    const res = await fetch(`${API_BASE}/essays/${slug}`, {
+      headers: authStore.getAuthHeaders(),
+    });
     if (!res.ok) return null;
     const data = await res.json();
     upsertEssay(data);
@@ -300,7 +432,10 @@ async function fetchEssayBySlug(slug) {
 export default {
   state,
   loadPosts,
+  fetchPagedPosts,
   loadEssays,
+  fetchPagedEssays,
+  loadEssayTags,
   loadAuthors,
   addPost,
   addEssay,

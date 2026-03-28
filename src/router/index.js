@@ -18,6 +18,7 @@ export default route(function (/* { store, ssrContext } */) {
     : (process.env.VUE_ROUTER_MODE === 'history' ? createWebHistory : createWebHashHistory)
 
   const isReadingRoute = (path = '') => path.startsWith('/read/')
+  const isAuthorRoute = (path = '') => path.startsWith('/authors/')
 
   const Router = createRouter({
     scrollBehavior: (to, from, savedPosition) => {
@@ -26,6 +27,10 @@ export default route(function (/* { store, ssrContext } */) {
       }
 
       if (isReadingRoute(to.path) && isReadingRoute(from.path)) {
+        return false
+      }
+
+      if (isAuthorRoute(to.path) && isAuthorRoute(from.path)) {
         return false
       }
 

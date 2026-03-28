@@ -1,7 +1,7 @@
 <template>
   <div class="admin-page">
     <section class="admin-page__hero">
-      <h1 class="admin-page__title page-reading-h2">Admin</h1>
+      <h1 class="admin-page__title page-reading-h2 page-heading-with-rule">Admin</h1>
       <p class="admin-page__lead page-reading-copy">
         Quản lý tài khoản Editor/Admin và theo dõi hoạt động gần đây trong hệ thống.
       </p>
@@ -351,14 +351,19 @@ export default defineComponent({
   width: 100%;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e6e0db;
+  color: #b1a59f;
   padding: 0.8rem 1rem;
   border-radius: 8px;
   font: inherit;
 }
 
 .admin-form__input:focus {
-  outline: 2px solid rgba(221, 82, 90, 0.6);
+  outline: 1px solid rgba(177, 165, 159, 0.42);
+  border-color: rgba(177, 165, 159, 0.28);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    0 0 0 3px rgba(177, 165, 159, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
 .admin-form__actions,
@@ -380,7 +385,7 @@ export default defineComponent({
   padding: 0.8rem 1rem;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06);
-  color: #e6e0db;
+  color: #b1a59f;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;

@@ -67,6 +67,13 @@
       </div>
     </div>
 
+    <div
+      v-if="hasMorePoems"
+      ref="poemLoadMoreTrigger"
+      class="reading-page__load-more-trigger"
+      aria-hidden="true"
+    ></div>
+
     <div v-if="!loading && !poems.length" class="content__item">
       <div class="content__item-description">
         <p>Chưa có bài nào trong mục này. Hãy đăng một bài mới ở trang Viết.</p>
@@ -90,8 +97,19 @@ export default defineComponent({
     const route = useRoute();
     const poemItems = ref([]);
     const poemEffectWrappers = ref([]);
+    const poemLoadMoreTrigger = ref(null);
     const visiblePoems = ref(new Set());
-    let poemObserver = null;
+    const pagedPoems = ref([]);
+    const totalPoems = ref(0);
+    const poemPage = ref(0);
+    const poemTotalPages = ref(1);
+    const poemsLoading = ref(false);
+    const poemsLoaded = ref(false);
+    const pageError = ref("");
+    const poemFeedSeed = ref("");
+    const POEM_BATCH_SIZE = 9;
+    let poemRevealObserver = null;
+    let poemLoadMoreObserver = null;
     let destroyHoverEffects = null;
     let hoverEffectSetupId = 0;
 
@@ -103,14 +121,15 @@ export default defineComponent({
       return "jp";
     });
 
-    const poems = computed(() => blogStore.getPostsByCategory(category.value));
-
-    const loading = computed(() => blogStore.state.loading);
-    const error = computed(() => blogStore.state.error);
+    const poems = computed(() => pagedPoems.value);
+    const loading = computed(() => poemsLoading.value && !poemsLoaded.value);
+    const error = computed(() => pageError.value);
+    const hasMorePoems = computed(() => poemPage.value < poemTotalPages.value);
     const itemGridStyle = (index) => ({
       "--aspect-ratio": "700/200",
       gridRow: String(index + 2),
     });
+    const createPoemFeedSeed = () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     const poemVisibilityKey = (id) => `${category.value}:${id}`;
 
@@ -127,10 +146,17 @@ export default defineComponent({
 
     const isPoemVisible = (id) => visiblePoems.value.has(poemVisibilityKey(id));
 
-    const destroyPoemObserver = () => {
-      if (poemObserver) {
-        poemObserver.disconnect();
-        poemObserver = null;
+    const destroyPoemRevealObserver = () => {
+      if (poemRevealObserver) {
+        poemRevealObserver.disconnect();
+        poemRevealObserver = null;
+      }
+    };
+
+    const destroyPoemLoadMoreObserver = () => {
+      if (poemLoadMoreObserver) {
+        poemLoadMoreObserver.disconnect();
+        poemLoadMoreObserver = null;
       }
     };
 
@@ -141,9 +167,12 @@ export default defineComponent({
       }
     };
 
-    const setupPoemReveal = async () => {
-      destroyPoemObserver();
-      visiblePoems.value = new Set();
+    const setupPoemReveal = async ({ reset = false } = {}) => {
+      destroyPoemRevealObserver();
+
+      if (reset) {
+        visiblePoems.value = new Set();
+      }
 
       await nextTick();
 
@@ -152,23 +181,62 @@ export default defineComponent({
         return;
       }
 
-      const [firstPoem, ...remainingPoems] = poemElements;
-      requestAnimationFrame(() => {
-        markPoemVisible(firstPoem.dataset.poemId);
-      });
+      const hiddenPoems = poemElements.filter(
+        (element) => !visiblePoems.value.has(poemVisibilityKey(element.dataset.poemId))
+      );
 
-      if (!remainingPoems.length) {
+      if (!hiddenPoems.length) {
+        return;
+      }
+
+      if (reset) {
+        const [firstPoem, ...remainingPoems] = hiddenPoems;
+        requestAnimationFrame(() => {
+          markPoemVisible(firstPoem.dataset.poemId);
+        });
+
+        if (!remainingPoems.length) {
+          return;
+        }
+
+        if (typeof IntersectionObserver === "undefined") {
+          remainingPoems.forEach((element) => {
+            markPoemVisible(element.dataset.poemId);
+          });
+          return;
+        }
+
+        poemRevealObserver = new IntersectionObserver(
+          (entries) => {
+            entries.forEach((entry) => {
+              if (!entry.isIntersecting) {
+                return;
+              }
+
+              markPoemVisible(entry.target.dataset.poemId);
+              poemRevealObserver?.unobserve(entry.target);
+            });
+          },
+          {
+            threshold: 0.08,
+            rootMargin: "0px 0px -4% 0px",
+          }
+        );
+
+        remainingPoems.forEach((element) => {
+          poemRevealObserver.observe(element);
+        });
         return;
       }
 
       if (typeof IntersectionObserver === "undefined") {
-        remainingPoems.forEach((element) => {
+        hiddenPoems.forEach((element) => {
           markPoemVisible(element.dataset.poemId);
         });
         return;
       }
 
-      poemObserver = new IntersectionObserver(
+      poemRevealObserver = new IntersectionObserver(
         (entries) => {
           entries.forEach((entry) => {
             if (!entry.isIntersecting) {
@@ -176,7 +244,7 @@ export default defineComponent({
             }
 
             markPoemVisible(entry.target.dataset.poemId);
-            poemObserver?.unobserve(entry.target);
+            poemRevealObserver?.unobserve(entry.target);
           });
         },
         {
@@ -185,9 +253,75 @@ export default defineComponent({
         }
       );
 
-      remainingPoems.forEach((element) => {
-        poemObserver.observe(element);
+      hiddenPoems.forEach((element) => {
+        poemRevealObserver.observe(element);
       });
+    };
+
+    const attachPoemLoadMoreObserver = async () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      await nextTick();
+      destroyPoemLoadMoreObserver();
+
+      if (!poemLoadMoreTrigger.value || !hasMorePoems.value) {
+        return;
+      }
+
+      poemLoadMoreObserver = new IntersectionObserver(
+        (entries) => {
+          if (!entries.some((entry) => entry.isIntersecting)) {
+            return;
+          }
+
+          loadPoemsPage();
+        },
+        {
+          rootMargin: "0px 0px 18% 0px",
+          threshold: 0.05,
+        }
+      );
+
+      poemLoadMoreObserver.observe(poemLoadMoreTrigger.value);
+    };
+
+    const loadPoemsPage = async ({ reset = false } = {}) => {
+      if (poemsLoading.value) {
+        return;
+      }
+
+      const nextPage = reset ? 1 : poemPage.value + 1;
+      if (!reset && nextPage > poemTotalPages.value) {
+        return;
+      }
+
+      poemsLoading.value = true;
+      pageError.value = "";
+
+      try {
+        const data = await blogStore.fetchPagedPosts({
+          category: category.value,
+          page: nextPage,
+          pageSize: POEM_BATCH_SIZE,
+          seed: poemFeedSeed.value,
+        });
+
+        pagedPoems.value = reset
+          ? data.items
+          : [...pagedPoems.value, ...data.items.filter((item) => !pagedPoems.value.some((poem) => poem.id === item.id))];
+        totalPoems.value = data.total;
+        poemPage.value = data.page;
+        poemTotalPages.value = data.totalPages;
+        poemsLoaded.value = true;
+      } catch (err) {
+        console.error("Không tải được thơ theo mục", err);
+        pageError.value = "Không tải được danh sách haiku.";
+      } finally {
+        poemsLoading.value = false;
+        await attachPoemLoadMoreObserver();
+      }
     };
 
     const setupHoverEffects = async () => {
@@ -226,24 +360,44 @@ export default defineComponent({
     };
 
     watch(
-      () => `${category.value}:${poems.value.map((poem) => poem.id).join(",")}`,
-      () => {
-        setupPoemReveal();
-        setupHoverEffects();
+      () => poems.value.map((poem) => poem.id).join(","),
+      async (currentIds, previousIds) => {
+        if (!currentIds) {
+          destroyPoemRevealObserver();
+          cleanupHoverEffects();
+          return;
+        }
+
+        const reset = !previousIds;
+        await setupPoemReveal({ reset });
+        await setupHoverEffects();
       },
       { flush: "post" }
     );
 
+    watch(
+      () => category.value,
+      async () => {
+        poemFeedSeed.value = createPoemFeedSeed();
+        pagedPoems.value = [];
+        totalPoems.value = 0;
+        poemPage.value = 0;
+        poemTotalPages.value = 1;
+        poemsLoaded.value = false;
+        visiblePoems.value = new Set();
+        await loadPoemsPage({ reset: true });
+      },
+      { immediate: true }
+    );
+
     onMounted(() => {
-      blogStore.loadPosts().finally(() => {
-        setupPoemReveal();
-        setupHoverEffects();
-      });
+      attachPoemLoadMoreObserver();
     });
 
     onBeforeUnmount(() => {
       hoverEffectSetupId += 1;
-      destroyPoemObserver();
+      destroyPoemRevealObserver();
+      destroyPoemLoadMoreObserver();
       cleanupHoverEffects();
     });
 
@@ -256,6 +410,8 @@ export default defineComponent({
       itemGridStyle,
       poemItems,
       poemEffectWrappers,
+      poemLoadMoreTrigger,
+      hasMorePoems,
       isPoemVisible,
     };
   },
@@ -267,7 +423,7 @@ export default defineComponent({
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 8vw;
-  row-gap: 14vh;
+  row-gap: 11vh;
   margin: 16vh 0 24vh;
   align-items: start;
   position: relative;
@@ -449,6 +605,12 @@ export default defineComponent({
 
 .reading-page__poem-source {
   display: none;
+}
+
+.reading-page__load-more-trigger {
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 1px;
 }
 
 @media screen and (max-width: 40em) {

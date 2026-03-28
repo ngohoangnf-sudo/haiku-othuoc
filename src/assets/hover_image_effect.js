@@ -5,6 +5,8 @@ export function initHoverImageEffects({
   foreground = container?.querySelector?.("[data-scroll]") || null,
   wrappers = [],
   strength = 0.22,
+  imageSelector = ".reading-page__poem-source",
+  effectKey = "reading-page",
 } = {}) {
   const tween = globalThis.TweenLite;
   const ease = globalThis.Power4;
@@ -12,7 +14,7 @@ export function initHoverImageEffects({
     .filter(Boolean)
     .map((wrapper) => ({
       wrapper,
-      img: wrapper.querySelector(".reading-page__poem-source"),
+      img: wrapper.querySelector(imageSelector),
     }))
     .filter((item) => item.img);
 
@@ -64,11 +66,11 @@ export function initHoverImageEffects({
       }
 
       this.container
-        .querySelectorAll('[data-hover-image-effect="reading-page"]')
+        .querySelectorAll(`[data-hover-image-effect="${effectKey}"]`)
         .forEach((element) => element.remove());
 
       this.host = document.createElement("div");
-      this.host.dataset.hoverImageEffect = "reading-page";
+      this.host.dataset.hoverImageEffect = effectKey;
       Object.assign(this.host.style, {
         position: "sticky",
         top: "0",
@@ -94,7 +96,7 @@ export function initHoverImageEffects({
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.1));
       const viewport = this.getViewportRect();
       this.renderer.setSize(viewport.width, viewport.height);
-      this.renderer.domElement.dataset.hoverImageEffectCanvas = "reading-page";
+      this.renderer.domElement.dataset.hoverImageEffectCanvas = effectKey;
       Object.assign(this.renderer.domElement.style, {
         position: "absolute",
         inset: "0",

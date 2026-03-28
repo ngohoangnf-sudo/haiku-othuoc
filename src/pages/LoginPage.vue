@@ -1,7 +1,7 @@
 <template>
   <div class="login-page">
     <section class="login-page__hero">
-      <h1 class="login-page__title page-reading-h2">Đăng nhập</h1>
+      <h1 class="login-page__title page-reading-h2 page-heading-with-rule">Đăng nhập</h1>
       <p class="login-page__lead page-reading-copy">
         Viewer có thể đọc tự do. Editor và Admin đăng nhập để chỉnh sửa nội dung hoặc quản trị hệ thống.
       </p>
@@ -31,9 +31,6 @@
 
       <p v-if="error" class="login-form__feedback login-form__feedback--error page-reading-copy">
         {{ error }}
-      </p>
-      <p v-else class="login-form__feedback page-reading-copy">
-        Tài khoản admin mặc định ở local: <code>admin</code> / <code>admin123456</code> nếu bạn chưa đổi trong env.
       </p>
     </form>
   </div>
@@ -134,14 +131,19 @@ export default defineComponent({
   width: 100%;
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e6e0db;
+  color: #b1a59f;
   padding: 0.85rem 1rem;
   border-radius: 8px;
   font: inherit;
 }
 
 .login-form__input:focus {
-  outline: 2px solid rgba(221, 82, 90, 0.6);
+  outline: 1px solid rgba(177, 165, 159, 0.42);
+  border-color: rgba(177, 165, 159, 0.28);
+  background: rgba(255, 255, 255, 0.055);
+  box-shadow:
+    0 0 0 3px rgba(177, 165, 159, 0.08),
+    0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
 .login-form__actions {
@@ -153,7 +155,7 @@ export default defineComponent({
   padding: 0.8rem 1rem;
   border: 1px solid rgba(255, 255, 255, 0.15);
   background: rgba(255, 255, 255, 0.06);
-  color: #e6e0db;
+  color: #b1a59f;
   border-radius: 8px;
   cursor: pointer;
   font: inherit;

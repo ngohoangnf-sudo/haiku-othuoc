@@ -614,6 +614,21 @@ async function getAllPosts(filters = {}) {
     clauses.push(`a.slug = $${values.length}`);
   }
 
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      p.title ILIKE $${values.length}
+      OR p.summary ILIKE $${values.length}
+      OR a.display_name ILIKE $${values.length}
+      OR EXISTS (
+        SELECT 1
+        FROM poem_lines pl_search
+        WHERE pl_search.poem_id = p.id
+          AND pl_search.content ILIKE $${values.length}
+      )
+    )`);
+  }
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
   const result = await pool.query(
@@ -646,6 +661,105 @@ async function getAllPosts(filters = {}) {
   );
 
   return result.rows.map(mapPoemRow);
+}
+
+async function getPagedPosts(filters = {}, pagination = {}) {
+  await init();
+
+  const values = [];
+  const clauses = [];
+
+  if (filters.category) {
+    values.push(filters.category);
+    clauses.push(`p.category = $${values.length}`);
+  }
+
+  if (filters.authorSlug) {
+    values.push(filters.authorSlug);
+    clauses.push(`a.slug = $${values.length}`);
+  }
+
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      p.title ILIKE $${values.length}
+      OR p.summary ILIKE $${values.length}
+      OR a.display_name ILIKE $${values.length}
+      OR EXISTS (
+        SELECT 1
+        FROM poem_lines pl_search
+        WHERE pl_search.poem_id = p.id
+          AND pl_search.content ILIKE $${values.length}
+      )
+    )`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const pageSize = Math.max(1, Math.min(Number(pagination.pageSize) || 12, 100));
+  const page = Math.max(1, Number(pagination.page) || 1);
+  const offset = (page - 1) * pageSize;
+
+  const countResult = await pool.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM poems p
+      JOIN authors a ON a.id = p.author_id
+      ${where}
+    `,
+    values
+  );
+
+  const total = countResult.rows[0]?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const safeOffset = (safePage - 1) * pageSize;
+  const itemsValues = [...values];
+  let orderClause = "ORDER BY p.published_at DESC NULLS LAST, p.created_at DESC";
+
+  if (pagination.seed) {
+    itemsValues.push(String(pagination.seed));
+    const seedPlaceholder = `$${itemsValues.length}`;
+    orderClause = `ORDER BY md5(${seedPlaceholder} || p.id::text), p.id`;
+  }
+
+  const itemsResult = await pool.query(
+    `
+      SELECT
+        p.id,
+        p.slug,
+        p.title,
+        p.category,
+        p.summary,
+        p.published_at AS "publishedAt",
+        p.created_at AS "createdAt",
+        p.updated_at AS "updatedAt",
+        a.display_name AS author,
+        a.slug AS "authorSlug",
+        COALESCE(m.source, '') AS image,
+        COALESCE(
+          json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
+          '[]'::json
+        ) AS lines
+      FROM poems p
+      JOIN authors a ON a.id = p.author_id
+      LEFT JOIN media_assets m ON m.id = p.media_asset_id
+      LEFT JOIN poem_lines pl ON pl.poem_id = p.id
+      ${where}
+      GROUP BY p.id, a.id, m.id
+      ${orderClause}
+      LIMIT $${itemsValues.length + 1}
+      OFFSET $${itemsValues.length + 2}
+    `,
+    [...itemsValues, pageSize, safeOffset]
+  );
+
+  return {
+    items: itemsResult.rows.map(mapPoemRow),
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+  };
 }
 
 async function getPostById(id) {
@@ -682,6 +796,41 @@ async function getPostById(id) {
   return result.rowCount ? mapPoemRow(result.rows[0]) : null;
 }
 
+async function getRandomPostWithImage() {
+  await init();
+
+  const result = await pool.query(
+    `
+      SELECT
+        p.id,
+        p.slug,
+        p.title,
+        p.category,
+        p.summary,
+        p.published_at AS "publishedAt",
+        p.created_at AS "createdAt",
+        p.updated_at AS "updatedAt",
+        a.display_name AS author,
+        a.slug AS "authorSlug",
+        COALESCE(m.source, '') AS image,
+        COALESCE(
+          json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
+          '[]'::json
+        ) AS lines
+      FROM poems p
+      JOIN authors a ON a.id = p.author_id
+      JOIN media_assets m ON m.id = p.media_asset_id
+      LEFT JOIN poem_lines pl ON pl.poem_id = p.id
+      WHERE COALESCE(m.source, '') <> ''
+      GROUP BY p.id, a.id, m.id
+      ORDER BY random()
+      LIMIT 1
+    `
+  );
+
+  return result.rowCount ? mapPoemRow(result.rows[0]) : null;
+}
+
 async function getAllEssays(filters = {}) {
   await init();
 
@@ -707,6 +856,26 @@ async function getAllEssays(filters = {}) {
   if (filters.status !== null) {
     values.push(filters.status || "published");
     clauses.push(`e.status = $${values.length}`);
+  }
+
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      e.title ILIKE $${values.length}
+      OR e.summary ILIKE $${values.length}
+      OR e.body ILIKE $${values.length}
+      OR COALESCE(a.display_name, '') ILIKE $${values.length}
+      OR EXISTS (
+        SELECT 1
+        FROM essay_tag_links etl_search
+        JOIN essay_tags t_search ON t_search.id = etl_search.tag_id
+        WHERE etl_search.essay_id = e.id
+          AND (
+            t_search.label ILIKE $${values.length}
+            OR t_search.slug ILIKE $${values.length}
+          )
+      )
+    )`);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -745,6 +914,152 @@ async function getAllEssays(filters = {}) {
   );
 
   return result.rows.map(mapEssayRow);
+}
+
+async function getPagedEssays(filters = {}, pagination = {}) {
+  await init();
+
+  const values = [];
+  const clauses = [];
+
+  if (filters.authorSlug) {
+    values.push(filters.authorSlug);
+    clauses.push(`a.slug = $${values.length}`);
+  }
+
+  if (filters.tagSlug) {
+    values.push(filters.tagSlug);
+    clauses.push(`EXISTS (
+      SELECT 1
+      FROM essay_tag_links etl_filter
+      JOIN essay_tags t_filter ON t_filter.id = etl_filter.tag_id
+      WHERE etl_filter.essay_id = e.id
+        AND t_filter.slug = $${values.length}
+    )`);
+  }
+
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`e.status = $${values.length}`);
+  }
+
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      e.title ILIKE $${values.length}
+      OR e.summary ILIKE $${values.length}
+      OR e.body ILIKE $${values.length}
+      OR COALESCE(a.display_name, '') ILIKE $${values.length}
+      OR EXISTS (
+        SELECT 1
+        FROM essay_tag_links etl_search
+        JOIN essay_tags t_search ON t_search.id = etl_search.tag_id
+        WHERE etl_search.essay_id = e.id
+          AND (
+            t_search.label ILIKE $${values.length}
+            OR t_search.slug ILIKE $${values.length}
+          )
+      )
+    )`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const pageSize = Math.max(1, Math.min(Number(pagination.pageSize) || 9, 100));
+  const page = Math.max(1, Number(pagination.page) || 1);
+
+  const countResult = await pool.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM essays e
+      LEFT JOIN authors a ON a.id = e.author_id
+      ${where}
+    `,
+    values
+  );
+
+  const total = countResult.rows[0]?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const safeOffset = (safePage - 1) * pageSize;
+
+  const itemsResult = await pool.query(
+    `
+      SELECT
+        e.id,
+        e.slug,
+        e.title,
+        e.summary,
+        e.body,
+        e.status,
+        e.published_at AS "publishedAt",
+        e.created_at AS "createdAt",
+        e.updated_at AS "updatedAt",
+        a.display_name AS author,
+        a.slug AS "authorSlug",
+        COALESCE(m.source, '') AS image,
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object('slug', t.slug, 'label', t.label)
+          ) FILTER (WHERE t.id IS NOT NULL),
+          '[]'::json
+        ) AS tags
+      FROM essays e
+      LEFT JOIN authors a ON a.id = e.author_id
+      LEFT JOIN media_assets m ON m.id = e.cover_media_id
+      LEFT JOIN essay_tag_links etl ON etl.essay_id = e.id
+      LEFT JOIN essay_tags t ON t.id = etl.tag_id
+      ${where}
+      GROUP BY e.id, a.id, m.id
+      ORDER BY e.published_at DESC NULLS LAST, e.created_at DESC
+      LIMIT $${values.length + 1}
+      OFFSET $${values.length + 2}
+    `,
+    [...values, pageSize, safeOffset]
+  );
+
+  return {
+    items: itemsResult.rows.map(mapEssayRow),
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+  };
+}
+
+async function getEssayTags(filters = {}) {
+  await init();
+
+  const values = [];
+  const clauses = [];
+
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`e.status = $${values.length}`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
+  const result = await pool.query(
+    `
+      SELECT
+        t.slug,
+        t.label,
+        COUNT(DISTINCT e.id)::int AS count
+      FROM essay_tags t
+      JOIN essay_tag_links etl ON etl.tag_id = t.id
+      JOIN essays e ON e.id = etl.essay_id
+      ${where}
+      GROUP BY t.id
+      ORDER BY t.label ASC
+    `,
+    values
+  );
+
+  return result.rows.map((row) => ({
+    slug: row.slug,
+    label: row.label,
+    count: row.count,
+  }));
 }
 
 async function getEssayById(id) {
@@ -1115,6 +1430,28 @@ async function seedIfEmpty(seedPosts = []) {
   }
 }
 
+async function seedPostsIfMissing(seedPosts = []) {
+  await init();
+  if (!seedPosts.length) {
+    return;
+  }
+
+  const ids = seedPosts.map((post) => post.id).filter(Boolean);
+  if (!ids.length) {
+    return;
+  }
+
+  const existing = await pool.query("SELECT id FROM poems WHERE id = ANY($1::text[])", [ids]);
+  const existingIds = new Set(existing.rows.map((row) => row.id));
+
+  for (const post of seedPosts) {
+    if (existingIds.has(post.id)) {
+      continue;
+    }
+    await insertPost(post);
+  }
+}
+
 async function seedEssaysIfEmpty(seedEssays = []) {
   await init();
   const result = await pool.query("SELECT COUNT(*)::int AS total FROM essays");
@@ -1186,18 +1523,23 @@ module.exports = {
   insertActivityLog,
   getActivityLogs,
   getAllPosts,
+  getPagedPosts,
   getPostById,
+  getRandomPostWithImage,
   insertPost,
   updatePost,
   deletePost,
   getAuthors,
   getAllEssays,
+  getPagedEssays,
   getEssayById,
   getEssayBySlug,
+  getEssayTags,
   insertEssay,
   updateEssay,
   deleteEssay,
   seedIfEmpty,
+  seedPostsIfMissing,
   seedEssaysIfEmpty,
   assignImagesIfMissing,
 };

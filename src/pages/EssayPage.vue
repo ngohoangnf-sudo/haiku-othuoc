@@ -9,7 +9,7 @@
         <p v-if="essay.tags?.length" class="essay-page__eyebrow page-reading-copy">
           {{ essay.tags.map((tag) => tag.label).join(" · ") }}
         </p>
-        <h1 class="essay-page__title page-reading-h2">{{ essay.title }}</h1>
+        <h1 class="essay-page__title page-reading-h2 page-heading-with-rule">{{ essay.title }}</h1>
         <p v-if="essay.summary" class="essay-page__summary page-reading-copy">{{ essay.summary }}</p>
         <div class="essay-page__meta page-reading-copy">
           <router-link
