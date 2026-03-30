@@ -1,4 +1,20 @@
 // app global css in SCSS form
+@font-face {
+  font-family: "EB Garamond";
+  src: url("../assets/fonts/EB_Garamond/EBGaramond-VariableFont_wght.ttf") format("truetype");
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  src: url("../assets/fonts/EB_Garamond/EBGaramond-Italic-VariableFont_wght.ttf") format("truetype");
+  font-style: italic;
+  font-weight: 300 700;
+  font-display: swap;
+}
+
 *,
 *::after,
 *::before {
@@ -11,6 +27,7 @@
   --page-reading-h3-size: clamp(2.2rem, 3.8vw, 3.8rem);
   --page-reading-copy-size: clamp(1.15rem, 1.02rem + 0.65vw, 1.5rem);
   --page-reading-copy-line-height: 1.7;
+  --font-title: "EB Garamond", serif;
   --color-text: #b1a59f;
   --color-text-rgb: 177 165 159;
   --color-bg: #333333;
@@ -89,10 +106,18 @@ body {
   color: var(--color-text);
   background-color: var(--color-bg);
   color-scheme: dark;
-  font-family: turquoise, serif;
+  font-family: "EB Garamond", serif;
   font-size: 1.5rem;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  font-family: inherit;
 }
 
 html {
@@ -176,7 +201,7 @@ main {
   --color-link-hover: #5c4541;
   --aspect-ratio: 32/17;
   font-size: 1.25rem;
-  font-family: ivymode, sans-serif;
+  font-family: "EB Garamond", serif;
   --size-title: 15vw;
 }
 
@@ -190,12 +215,11 @@ main {
   --color-bg: #120605;
   --color-link: #8f8f76;
   --color-link-hover: #fff;
-  font-family: "Segoe UI", Frutiger, "Frutiger Linotype", "Dejavu Sans",
-    "Helvetica Neue", Arial, sans-serif;
+  font-family: "EB Garamond", serif;
   font-size: 1rem;
   --imgwidthmax: 400px;
   --color-description: #7e605b;
-  --font-title: ivymode;
+  --font-title: "EB Garamond", serif;
   --size-title: 9vw;
   --imgwidthmax: 600px;
 }
@@ -206,8 +230,8 @@ main {
   --color-link: #fff;
   --color-link-hover: #a9a798;
   --color-title: #fff;
-  font-family: collier, sans-serif;
-  --font-title: inherit;
+  font-family: "EB Garamond", serif;
+  --font-title: "EB Garamond", serif;
   --font-weight-title: 100;
   font-size: 1.15rem;
   --imgwidthmax: 520px;
@@ -219,8 +243,8 @@ main {
   --color-link: #c5a45b;
   --color-link-hover: #f0f0f0;
   --color-title: #f0f0f0;
-  font-family: input-mono, monospace;
-  --font-title: inherit;
+  font-family: "EB Garamond", serif;
+  --font-title: "EB Garamond", serif;
   font-size: 1.15rem;
   --aspect-ratio: 1/1.5;
   --font-weight-title: 800;
@@ -232,8 +256,8 @@ main {
   --color-link: #c55b61;
   --color-link-hover: #1d1414;
   --color-title: #1d1414;
-  font-family: ivymode, sans-serif;
-  --font-title: inherit;
+  font-family: "EB Garamond", serif;
+  --font-title: "EB Garamond", serif;
   font-size: 1.15rem;
   --aspect-ratio: 1/1.5;
   --imgwidthmax: 505px;
@@ -506,36 +530,109 @@ a:focus {
 }
 
 @media screen and (max-width: 40em) {
+  :root {
+    --page-reading-h2-size: clamp(2.2rem, 9vw, 3.1rem);
+    --page-reading-h3-size: clamp(1.7rem, 6.2vw, 2.2rem);
+    --page-reading-copy-size: clamp(1rem, 0.94rem + 0.4vw, 1.12rem);
+    --page-reading-copy-line-height: 1.62;
+  }
+
+  body {
+    font-size: 1.15rem;
+  }
+
   .page__header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 0.85rem;
+    grid-template-columns: max-content max-content minmax(0, 1fr) max-content;
+    grid-template-rows: auto auto;
+    column-gap: 0.55rem;
+    row-gap: 0.7rem;
     width: 100%;
+    align-items: start;
+    position: relative;
   }
 
   .page__title {
-    display: block;
+    grid-column: 1 / 3;
+    grid-row: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 0.35rem;
   }
 
   .page__title-prefix,
   .page__title-main {
-    display: inline;
-    grid-column: auto;
-    grid-row: auto;
+    display: block;
+    width: max-content;
   }
 
   .page__nav {
     grid-column: 1;
-    grid-row: auto;
+    grid-row: 2;
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    width: max-content;
+    gap: 2.1rem;
+  }
+
+  .page__nav-column {
+    gap: 0.3rem;
+  }
+
+  .page__nav-column--secondary {
+    align-items: flex-start;
+    text-align: left;
   }
 
   .page__auth {
-    grid-column: 1;
-    grid-row: auto;
-    justify-self: start;
-    justify-content: flex-start;
-    text-align: left;
+    grid-column: 4;
+    grid-row: 1;
+    justify-self: end;
+    justify-content: flex-end;
+    text-align: right;
+    width: auto;
+    gap: 0.6rem;
   }
+
+  .page__auth--authenticated {
+    position: absolute;
+    top: 0;
+    right: 0;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: flex-end;
+    justify-content: flex-start;
+    gap: 0.18rem;
+    width: max-content;
+    max-width: min(42vw, 14rem);
+  }
+
+  .page__auth--authenticated .page__auth-link,
+  .page__auth--authenticated .page__auth-label,
+  .page__auth--authenticated .page__auth-button {
+    width: auto;
+    text-align: right;
+    line-height: 1.2;
+    white-space: nowrap;
+  }
+
+  .page__auth--authenticated .page__auth-link--profile {
+    max-width: min(42vw, 14rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .page__auth--authenticated .page__theme-toggle {
+    margin-top: 0.15rem;
+    align-self: flex-end;
+  }
+}
+
+html.landing-page-mobile-lock,
+body.landing-page-mobile-lock {
+  overflow: hidden;
+  height: 100svh;
 }
 
 .credits {

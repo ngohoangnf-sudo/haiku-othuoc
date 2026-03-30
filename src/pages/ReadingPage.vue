@@ -615,14 +615,15 @@ export default defineComponent({
 @media screen and (max-width: 40em) {
   .reading-page {
     grid-template-columns: minmax(0, 1fr);
-    row-gap: 9vh;
+    row-gap: 15vh;
     margin-top: 10vh;
-    margin-bottom: 14vh;
+    margin-bottom: 18vh;
   }
 
   .reading-page__item {
     width: 100%;
-    min-height: auto;
+    min-height: 86vh;
+    align-content: start;
   }
 
   .reading-page__hero {
@@ -656,9 +657,10 @@ export default defineComponent({
 
   .reading-page__poem {
     width: 100%;
-    margin-top: 5vh;
+    margin-top: 7.5vh;
     padding-inline: 0;
     padding-bottom: 1rem;
+    overflow: visible;
   }
 
   .reading-page__title {
@@ -667,9 +669,17 @@ export default defineComponent({
     white-space: normal;
   }
 
+  .reading-page__poem .link {
+    width: auto;
+    min-width: 0;
+    gap: 0.45rem;
+  }
+
   .reading-page__poem p {
-    width: 100%;
-    white-space: normal;
+    width: max-content;
+    max-width: none;
+    white-space: nowrap;
+    line-height: 1.32;
   }
 }
 </style>

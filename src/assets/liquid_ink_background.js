@@ -13,7 +13,7 @@ export async function initLiquidInkBackground({
   prefersReducedMotion = false,
 } = {}) {
   const pixelRatioCap = 1;
-  const targetFps = 30;
+  const targetFps = 24;
   const frameInterval = 1000 / targetFps;
 
   if (!mount || typeof window === "undefined" || prefersReducedMotion) {
@@ -103,7 +103,7 @@ export async function initLiquidInkBackground({
         float value = 0.0;
         float amplitude = 0.5;
 
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 4; i++) {
           value += amplitude * noise(p);
           p = rotate2D(0.42) * p * 2.02;
           amplitude *= 0.5;
@@ -174,10 +174,9 @@ export async function initLiquidInkBackground({
         float inkBody = fbm(p + advection + vec2(uTime * 0.012, -uTime * 0.009));
         float inkShadow = fbm((p * 1.45) - fluid * 1.2 - vec2(uTime * 0.01, uTime * 0.006));
         float tendrils = ridge((p * 1.85) + fluid * 1.45 - wake * 0.45 - vec2(uTime * 0.006, -uTime * 0.005));
-        float eddies = ridge((rotate2D(-0.3) * p * 2.3) - fluid * 0.9 + vec2(uTime * 0.007, uTime * 0.004));
 
         float bloom = smoothstep(0.2, 0.94, inkBody * 0.72 + inkShadow * 0.35);
-        float filaments = smoothstep(0.3, 0.9, tendrils * 0.9 + eddies * 0.3);
+        float filaments = smoothstep(0.3, 0.9, tendrils);
 
         vec2 paperPoint = rotate2D(-0.18) * centered * vec2(1.0, 1.12);
         vec2 paperFlow = warp(paperPoint * 0.32, 0.64);
@@ -189,20 +188,8 @@ export async function initLiquidInkBackground({
         float paperTexture = fbm(
           paperField * 0.82 + vec2(uTime * 0.0022, -uTime * 0.0018)
         );
-        float paperTextureDetail = fbm(
-          (rotate2D(-0.08) * paperField) * 1.46 - paperFlow * 0.06 - vec2(uTime * 0.0018, uTime * 0.0013)
-        );
         float paperFiber = ridge(
           paperField * 4.4 + vec2(uTime * 0.004, -uTime * 0.003)
-        );
-        float paperFiberCross = ridge(
-          (rotate2D(0.42) * paperField) * 5.8 + vec2(uTime * 0.0026, -uTime * 0.0021)
-        );
-        float paperPulp = fbm(
-          (rotate2D(0.36) * paperField) * 2.6 + vec2(3.4, 1.7)
-        );
-        float paperTooth = fbm(
-          paperField * 6.6 + vec2(7.2, 4.1)
         );
 
         float paperWrinkleA =
@@ -223,7 +210,7 @@ export async function initLiquidInkBackground({
         float paperShimmer = smoothstep(
           0.24,
           0.94,
-          0.5 + 0.5 * (paperTexture * 0.36 + paperTextureDetail * 0.22 + paperWrinkleA * 0.18)
+          0.5 + 0.5 * (paperTexture * 0.44 + paperWrinkleA * 0.2)
         );
         float paperFiberCoarse =
           hash(floor((paperField + vec2(9.2, 4.7)) * 220.0)) - 0.5;
@@ -278,9 +265,6 @@ export async function initLiquidInkBackground({
         paperColor += paperHighlightColor * clamp(paperLight - 0.62, 0.0, 1.0) * 0.045;
         paperColor -= vec3(0.07, 0.064, 0.054) * paperOcclusion * 0.18;
         paperColor -= vec3(0.028, 0.025, 0.02) * paperFiber * 0.032;
-        paperColor -= vec3(0.018, 0.016, 0.012) * paperFiberCross * 0.024;
-        paperColor += vec3(paperPulp - 0.5) * 0.014;
-        paperColor += vec3(paperTooth - 0.5) * 0.01;
         paperColor += vec3(paperGrain) * (0.03 + paperHeight * 0.007);
 
         vec3 color = mix(liquidColor, paperColor, uThemeMix);

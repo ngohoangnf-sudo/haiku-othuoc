@@ -2440,7 +2440,17 @@ export default defineComponent({
   }
 
   .write-page__mode-switch {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    width: 100%;
+    gap: 1rem;
+  }
+
+  .write-page__mode-tab {
+    min-width: 0;
+  }
+
+  .write-page__mode-tab-label {
+    white-space: nowrap;
   }
 
   .write-page__preview-list--poems,

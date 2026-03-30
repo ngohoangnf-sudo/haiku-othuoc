@@ -16,7 +16,10 @@
         <router-link to="/library" class="link"><p>Thư viện</p></router-link>
       </div>
     </nav>
-    <div class="page__auth">
+    <div
+      class="page__auth"
+      :class="{ 'page__auth--authenticated': isAuthenticated }"
+    >
       <router-link v-if="isAdmin" to="/admin" class="page__auth-link">Admin</router-link>
       <template v-if="isAuthenticated">
         <router-link to="/profile" class="page__auth-link page__auth-link--profile">
