@@ -268,6 +268,7 @@ Một chút quà Edo"
             <RichEssayEditor
               v-model="essayForm.body"
               placeholder="Viết nghiên cứu hoặc bình luận ở đây."
+              :upload-image="uploadEssayBodyImage"
               @image-uploaded="handleEssayBodyImageUploaded"
               @error="handleEssayEditorError"
             />
@@ -534,6 +535,7 @@ import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
 import { MOTION_PRESETS, animateGridEnterByRows, animateGridExit, killMotion } from "src/utils/motion";
 import { excerptEssayContent, sanitizeEssayHtml, stripEssayText } from "src/utils/essayContent";
+import { uploadImageToMediaStore } from "src/utils/mediaUpload";
 
 const CATEGORY_OPTIONS = [
   { value: "jp", label: "Haiku Nhật" },
@@ -1155,14 +1157,6 @@ export default defineComponent({
       resetEssayForm();
     };
 
-    const readFileAsDataUrl = (file) =>
-      new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(String(reader.result || ""));
-        reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
-        reader.readAsDataURL(file);
-      });
-
     const setScopedMessage = (type, value) => {
       if (type === "essay") {
         essayMessage.value = value;
@@ -1179,6 +1173,27 @@ export default defineComponent({
     const handleEssayEditorError = (message) => {
       essayMessage.value = message || "Không chèn được ảnh vào nội dung.";
     };
+
+    const uploadMediaFile = async (file, scope, type) => {
+      try {
+        const uploaded = await uploadImageToMediaStore(file, {
+          scope,
+        });
+        setScopedMessage(type, "");
+        return uploaded;
+      } catch (error) {
+        const fallback =
+          type === "essay"
+            ? "Không tải được ảnh bìa lên kho media."
+            : "Không tải được ảnh haiku lên kho media.";
+        throw new Error(error?.message || fallback);
+      }
+    };
+
+    const uploadEssayBodyImage = async (file) =>
+      uploadImageToMediaStore(file, {
+        scope: "essay-inline",
+      });
 
     const handleImageUpload = async (event, type) => {
       const file = event.target?.files?.[0];
@@ -1204,9 +1219,13 @@ export default defineComponent({
       }
 
       try {
-        const dataUrl = await readFileAsDataUrl(file);
+        const uploaded = await uploadMediaFile(
+          file,
+          type === "essay" ? "essay-cover" : "poem-cover",
+          type
+        );
         if (type === "essay") {
-          essayForm.image = dataUrl;
+          essayForm.image = uploaded.url;
           essayUploadedImageName.value = file.name;
           essayMessage.value = "";
           persistDraft("essay", {
@@ -1214,7 +1233,7 @@ export default defineComponent({
             uploadedImageName: file.name,
           });
         } else {
-          poemForm.image = dataUrl;
+          poemForm.image = uploaded.url;
           poemUploadedImageName.value = file.name;
           poemMessage.value = "";
           persistDraft("poem", {
@@ -1222,9 +1241,9 @@ export default defineComponent({
             uploadedImageName: file.name,
           });
         }
-        showToast(`Đã tải ảnh "${file.name}".`);
-      } catch (_err) {
-        setScopedMessage(type, "Không đọc được file ảnh. Thử lại.");
+        showToast(`Đã tải ảnh "${file.name}" lên kho media.`);
+      } catch (error) {
+        setScopedMessage(type, error?.message || "Không tải được file ảnh. Thử lại.");
         event.target.value = "";
       }
     };
@@ -1499,6 +1518,7 @@ export default defineComponent({
       excerptEssay,
       handleEssayBodyImageUploaded,
       handleEssayEditorError,
+      uploadEssayBodyImage,
       openAuthorSuggestions,
       scheduleAuthorSuggestionsClose,
       selectSuggestedAuthor,

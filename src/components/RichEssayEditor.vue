@@ -7,12 +7,17 @@
         class="rich-editor__tool"
         :class="{ 'rich-editor__tool--active': action.active?.() }"
         type="button"
-        :disabled="disabled"
+        :disabled="disabled || uploadingImage"
         @click="action.run"
       >
         {{ action.label }}
       </button>
-      <button class="rich-editor__tool" type="button" :disabled="disabled" @click="openImagePicker">
+      <button
+        class="rich-editor__tool"
+        type="button"
+        :disabled="disabled || uploadingImage"
+        @click="openImagePicker"
+      >
         Ảnh
       </button>
     </div>
@@ -39,15 +44,6 @@ import { normalizeEssayBodyHtml } from "src/utils/essayContent";
 
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
 
-function readFileAsDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || ""));
-    reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
-    reader.readAsDataURL(file);
-  });
-}
-
 export default defineComponent({
   name: "RichEssayEditor",
   components: {
@@ -66,10 +62,15 @@ export default defineComponent({
       type: Boolean,
       default: false,
     },
+    uploadImage: {
+      type: Function,
+      default: null,
+    },
   },
   emits: ["update:modelValue", "image-uploaded", "error"],
   setup(props, { emit }) {
     const imageInput = ref(null);
+    const uploadingImage = ref(false);
     const editor = useEditor({
       content: normalizeEssayBodyHtml(props.modelValue),
       editable: !props.disabled,
@@ -172,7 +173,7 @@ export default defineComponent({
     });
 
     const openImagePicker = () => {
-      if (!editor.value || props.disabled) {
+      if (!editor.value || props.disabled || uploadingImage.value) {
         return;
       }
       imageInput.value?.click();
@@ -197,9 +198,23 @@ export default defineComponent({
       }
 
       try {
-        const src = await readFileAsDataUrl(file);
+        uploadingImage.value = true;
         if (!editor.value) {
           emit("error", "Trình soạn thảo chưa sẵn sàng.");
+          return;
+        }
+
+        if (typeof props.uploadImage !== "function") {
+          emit("error", "Chưa cấu hình upload ảnh cho trình soạn thảo.");
+          return;
+        }
+
+        const uploadResult = await props.uploadImage(file);
+        const src =
+          typeof uploadResult === "string" ? uploadResult : String(uploadResult?.url || "").trim();
+
+        if (!src) {
+          emit("error", "Không lấy được URL ảnh sau khi upload.");
           return;
         }
 
@@ -226,9 +241,10 @@ export default defineComponent({
         }
 
         emit("image-uploaded", file.name);
-      } catch (_error) {
-        emit("error", "Không đọc được file ảnh. Thử lại.");
+      } catch (error) {
+        emit("error", error?.message || "Không tải được ảnh lên. Thử lại.");
       } finally {
+        uploadingImage.value = false;
         event.target.value = "";
       }
     };
@@ -240,6 +256,7 @@ export default defineComponent({
     return {
       editor,
       imageInput,
+      uploadingImage,
       toolbarActions,
       openImagePicker,
       handleImageSelected,

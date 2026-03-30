@@ -3,6 +3,8 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const { randomUUID } = require("crypto");
+const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { loadEnvFile } = require("./loadEnv");
 const {
   hashPassword,
@@ -21,12 +23,19 @@ const localMediaRoot = path.resolve(__dirname, "..", "src", "assets");
 const SESSION_TTL_MS = resolveSessionTtlMs(process.env.SESSION_TTL_DAYS);
 const isProduction = process.env.NODE_ENV === "production";
 const LEGACY_CONTENT_USERNAME = process.env.LEGACY_CONTENT_USERNAME || "ngohoang";
+const S3_UPLOAD_BUCKET = String(process.env.S3_UPLOAD_BUCKET || "").trim();
+const S3_UPLOAD_REGION = String(process.env.S3_UPLOAD_REGION || process.env.AWS_REGION || "").trim();
+const S3_UPLOAD_PREFIX = normalizeObjectKeyPrefix(process.env.S3_UPLOAD_PREFIX || "haiku-image");
+const MEDIA_PUBLIC_BASE = normalizeBaseUrl(process.env.MEDIA_PUBLIC_BASE || "");
+const MEDIA_UPLOAD_MAX_BYTES = resolveMediaUploadMaxBytes(process.env.MEDIA_UPLOAD_MAX_MB);
+const MEDIA_UPLOAD_URL_TTL_SECONDS = 15 * 60;
 const DEFAULT_BOOTSTRAP_ADMIN = {
   username: process.env.BOOTSTRAP_ADMIN_USERNAME || "admin",
   password:
     process.env.BOOTSTRAP_ADMIN_PASSWORD || (isProduction ? "" : "admin123456"),
   displayName: process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME || "Administrator",
 };
+let s3UploadClient = null;
 const corsOrigins = String(process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())
@@ -259,6 +268,51 @@ app.get("/api/me/activity", requireEditor, async (req, res) => {
   } catch (err) {
     console.error("Lỗi lấy nhật ký cá nhân", err);
     res.status(500).json({ message: "Không lấy được nhật ký hoạt động của bạn" });
+  }
+});
+
+app.post("/api/media/presign", requireEditor, async (req, res) => {
+  try {
+    if (!S3_UPLOAD_BUCKET || !S3_UPLOAD_REGION || !MEDIA_PUBLIC_BASE) {
+      return res.status(503).json({
+        message: "Media upload chưa được cấu hình trên máy chủ.",
+      });
+    }
+
+    const fileName = typeof req.body?.fileName === "string" ? req.body.fileName.trim() : "";
+    const contentType = typeof req.body?.contentType === "string" ? req.body.contentType.trim() : "";
+    const scope = normalizeMediaUploadScope(req.body?.scope);
+    const size = Number(req.body?.size || 0);
+
+    if (!fileName || !contentType) {
+      return res.status(400).json({ message: "Thiếu thông tin file upload." });
+    }
+
+    if (!contentType.startsWith("image/")) {
+      return res.status(400).json({ message: "Chỉ hỗ trợ upload file ảnh." });
+    }
+
+    if (!Number.isFinite(size) || size <= 0) {
+      return res.status(400).json({ message: "Kích thước file không hợp lệ." });
+    }
+
+    if (size > MEDIA_UPLOAD_MAX_BYTES) {
+      return res.status(400).json({
+        message: `Ảnh quá lớn. Hãy chọn ảnh nhỏ hơn ${Math.round(MEDIA_UPLOAD_MAX_BYTES / (1024 * 1024))}MB.`,
+      });
+    }
+
+    const upload = await createPresignedMediaUpload({
+      fileName,
+      contentType,
+      scope,
+      actorUserId: req.auth.user.id,
+    });
+
+    res.json(upload);
+  } catch (err) {
+    console.error("Lỗi tạo presigned media upload", err);
+    res.status(500).json({ message: "Không tạo được link upload ảnh." });
   }
 });
 
@@ -1487,6 +1541,107 @@ function normalizeRoutePrefix(value = "/media") {
   return withLeadingSlash.endsWith("/")
     ? withLeadingSlash.slice(0, -1)
     : withLeadingSlash;
+}
+
+function normalizeBaseUrl(value = "") {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "";
+  }
+
+  return normalized.endsWith("/") ? normalized.slice(0, -1) : normalized;
+}
+
+function normalizeObjectKeyPrefix(value = "") {
+  return String(value || "")
+    .trim()
+    .replace(/^\/+/, "")
+    .replace(/\/+$/, "");
+}
+
+function resolveMediaUploadMaxBytes(value) {
+  const mb = Number(value || 5);
+  const safeMb = Number.isFinite(mb) && mb > 0 ? mb : 5;
+  return safeMb * 1024 * 1024;
+}
+
+function normalizeMediaUploadScope(value = "") {
+  const normalized = String(value || "").trim();
+
+  switch (normalized) {
+    case "poem-cover":
+      return "poems";
+    case "essay-cover":
+      return "essays/covers";
+    case "essay-inline":
+      return "essays/inline";
+    default:
+      return "misc";
+  }
+}
+
+function resolveUploadExtension(fileName = "", contentType = "") {
+  const explicitExtension = path.extname(String(fileName || "")).toLowerCase();
+  if (explicitExtension && /^[.][a-z0-9]{1,10}$/i.test(explicitExtension)) {
+    return explicitExtension;
+  }
+
+  const mimeExtensions = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/avif": ".avif",
+    "image/svg+xml": ".svg",
+  };
+
+  return mimeExtensions[contentType] || "";
+}
+
+function getS3UploadClient() {
+  if (!s3UploadClient) {
+    s3UploadClient = new S3Client({
+      region: S3_UPLOAD_REGION,
+    });
+  }
+
+  return s3UploadClient;
+}
+
+async function createPresignedMediaUpload({ fileName, contentType, scope, actorUserId }) {
+  const now = new Date();
+  const year = String(now.getUTCFullYear());
+  const month = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const extension = resolveUploadExtension(fileName, contentType);
+  const objectKey = [S3_UPLOAD_PREFIX, scope, year, month, `${Date.now()}-${randomUUID()}${extension}`]
+    .filter(Boolean)
+    .join("/");
+
+  const command = new PutObjectCommand({
+    Bucket: S3_UPLOAD_BUCKET,
+    Key: objectKey,
+    ContentType: contentType,
+    CacheControl: "public, max-age=31536000, immutable",
+    Metadata: actorUserId
+      ? {
+          actor_user_id: actorUserId,
+        }
+      : undefined,
+  });
+
+  const uploadUrl = await getSignedUrl(getS3UploadClient(), command, {
+    expiresIn: MEDIA_UPLOAD_URL_TTL_SECONDS,
+  });
+
+  return {
+    method: "PUT",
+    uploadUrl,
+    publicUrl: `${MEDIA_PUBLIC_BASE}/${objectKey}`,
+    key: objectKey,
+    headers: {
+      "Content-Type": contentType,
+    },
+  };
 }
 
 function resolveLocalMediaCandidates(assetPath = "") {

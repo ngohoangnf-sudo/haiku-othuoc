@@ -86,40 +86,441 @@ This starts:
 
 The app serves both `/api/*` and the built SPA from the same service.
 
-## S3 + CloudFront + Lightsail
-This repo is now prepared for the deployment shape:
+## Production deployment
+
+This project is currently deployed with three subdomains:
+
+- `haiku.othuoc.space` for the frontend SPA
+- `media.othuoc.space` for uploaded and migrated media
+- `api.othuoc.space` for the backend API
+
+Recommended production shape:
 
 - frontend static build on S3
-- CloudFront in front of the site
-- `/api/*` forwarded by CloudFront to the Node app on Lightsail
-- `/media/*` optionally forwarded to the same Node app while local seeded assets still exist
+- CloudFront in front of the frontend bucket
+- media bucket on S3
+- CloudFront in front of the media bucket
+- Node API on a Lightsail Ubuntu instance
+- PostgreSQL self-hosted on the same Lightsail instance
 
-Recommended runtime settings:
+### DNS and TLS
+
+The current DNS provider can stay on Namecheap. There is no need to move DNS to Route 53 just to deploy.
+
+Recommended certificate strategy:
+
+- request one ACM certificate in `us-east-1`
+- include both:
+  - `othuoc.space`
+  - `*.othuoc.space`
+
+That certificate can then be attached to CloudFront distributions that serve:
+
+- `haiku.othuoc.space`
+- `media.othuoc.space`
+
+Notes:
+
+- `*.othuoc.space` covers `haiku.othuoc.space`, `media.othuoc.space`, and `api.othuoc.space`
+- it does not cover deeper names such as `www.haiku.othuoc.space`
+- with ACM DNS validation, `othuoc.space` and `*.othuoc.space` may share the same CNAME validation record; that is expected
+
+In Namecheap, CloudFront subdomains should normally be created as `CNAME` records:
+
+- `haiku` -> `dxxxxxxxxxxxx.cloudfront.net`
+- `media` -> `dyyyyyyyyyyyy.cloudfront.net`
+
+The API subdomain should point to the Lightsail static IP:
+
+- `api` -> `A record` -> Lightsail static IP
+
+### S3 and CloudFront
+
+Recommended buckets:
+
+- one bucket for the frontend build
+- one bucket for media
+
+Recommended distributions:
+
+- one CloudFront distribution for the frontend bucket
+- one CloudFront distribution for the media bucket
+
+This split is not strictly required, but it keeps frontend deploys and media caching separate:
+
+- frontend files need frequent invalidation and careful handling of `index.html`
+- media files can usually be cached for much longer
+
+#### Frontend distribution
+
+Set:
+
+- alternate domain name: `haiku.othuoc.space`
+- custom SSL certificate: the ACM certificate created in `us-east-1`
+- default root object: `index.html`
+
+Because this app uses Vue Router history mode, configure custom error responses:
+
+- `403` -> `/index.html` with response code `200`
+- `404` -> `/index.html` with response code `200`
+
+This is required so routes such as `/authors/basho` or `/essays?kind=research` still load after a refresh.
+
+#### Media distribution
+
+Set:
+
+- alternate domain name: `media.othuoc.space`
+- custom SSL certificate: the same ACM certificate
+
+### Frontend build
+
+Frontend runtime base URLs come from [src/utils/runtime.js](/Users/nguoididay/Projects/Personal%20projects/haiku/src/utils/runtime.js#L1).
+
+For production, use:
 
 ```bash
-VITE_API_BASE=/api
-VITE_MEDIA_BASE=/media/local
+VITE_API_BASE=https://api.othuoc.space/api
+VITE_MEDIA_BASE=https://media.othuoc.space
+```
+
+An example production file:
+
+```bash
+# .env.production
+VITE_API_BASE=https://api.othuoc.space/api
+VITE_MEDIA_BASE=https://media.othuoc.space
+```
+
+Build:
+
+```bash
+npm run build
+```
+
+Output is written to:
+
+```bash
+dist/spa
+```
+
+To upload the frontend build:
+
+```bash
+aws s3 sync dist/spa s3://YOUR_FRONTEND_BUCKET --delete
+```
+
+Then invalidate CloudFront:
+
+```bash
+aws cloudfront create-invalidation \
+  --distribution-id YOUR_FRONTEND_DISTRIBUTION_ID \
+  --paths "/*"
+```
+
+`create-invalidation` is required because CloudFront may still serve cached copies of `index.html` and old bundles even after S3 has the new build.
+
+### Lightsail instance
+
+Recommended instance:
+
+- Ubuntu `24.04 LTS`
+- `2 GB RAM / 2 vCPU / 60 GB SSD`
+
+Attach a static IP and open ports:
+
+- `22`
+- `80`
+- `443`
+
+Do not expose PostgreSQL publicly.
+
+### SSH
+
+Typical SSH command:
+
+```bash
+ssh -i ~/.ssh/LightsailDefaultKey-ap-southeast-1.pem ubuntu@YOUR_LIGHTSAIL_STATIC_IP
+```
+
+If SSH reports `UNPROTECTED PRIVATE KEY FILE`, tighten the key permissions first:
+
+```bash
+chmod 600 ~/.ssh/LightsailDefaultKey-ap-southeast-1.pem
+```
+
+### Base packages
+
+```bash
+sudo apt update
+sudo apt upgrade -y
+sudo apt install -y curl git unzip build-essential
+```
+
+### Node.js
+
+Use Node `22.x` in production.
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+sudo apt install -y nodejs
+node -v
+npm -v
+```
+
+### PM2
+
+Install PM2 globally:
+
+```bash
+sudo npm install -g pm2
+```
+
+Run the API:
+
+```bash
+cd /var/www/haiku-othuoc
+pm2 start server/index.js --name haiku-api
+pm2 save
+pm2 startup
+```
+
+After `pm2 startup`, PM2 prints one more `sudo ...` command. Run that command once so the process restarts with the server.
+
+Useful PM2 commands:
+
+```bash
+pm2 list
+pm2 logs haiku-api --lines 100
+pm2 restart haiku-api
+pm2 restart haiku-api --update-env
+pm2 stop haiku-api
+pm2 delete haiku-api
+```
+
+### PostgreSQL
+
+Install PostgreSQL:
+
+```bash
+sudo apt install -y postgresql postgresql-contrib
+sudo systemctl status postgresql
+```
+
+Create a production role and database:
+
+```bash
+sudo -u postgres psql
+```
+
+Then in `psql`:
+
+```sql
+CREATE ROLE haiku_app LOGIN PASSWORD 'STRONG_PASSWORD';
+CREATE DATABASE haiku OWNER haiku_app;
+\q
+```
+
+### Caddy reverse proxy
+
+Install Caddy:
+
+```bash
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update
+sudo apt install -y caddy
+```
+
+Recommended `/etc/caddy/Caddyfile`:
+
+```caddy
+api.othuoc.space {
+  encode zstd gzip
+
+  reverse_proxy 127.0.0.1:4000
+
+  header {
+    X-Content-Type-Options nosniff
+    X-Frame-Options SAMEORIGIN
+    Referrer-Policy strict-origin-when-cross-origin
+  }
+
+  log {
+    output file /var/log/caddy/api.othuoc.space.log
+    format console
+  }
+}
+```
+
+Format, validate, and reload:
+
+```bash
+sudo caddy fmt --overwrite /etc/caddy/Caddyfile
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl reload caddy
+```
+
+If `api.othuoc.space` already points to the instance, Caddy will automatically request and renew the TLS certificate.
+
+### Backend environment
+
+Create a production environment file on the server, for example `.env` in the app directory:
+
+```bash
+NODE_ENV=production
+PORT=4000
+
+DATABASE_URL=postgresql://haiku_app:STRONG_PASSWORD@127.0.0.1:5432/haiku
+PGHOST=127.0.0.1
+PGPORT=5432
+PGDATABASE=haiku
+PGUSER=haiku_app
+PGPASSWORD=STRONG_PASSWORD
+
+CORS_ORIGIN=https://haiku.othuoc.space
+S3_UPLOAD_BUCKET=haiku-media-prod
+S3_UPLOAD_REGION=ap-southeast-1
+S3_UPLOAD_PREFIX=haiku-image
+MEDIA_PUBLIC_BASE=https://media.othuoc.space
+MEDIA_UPLOAD_MAX_MB=5
+
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=VERY_STRONG_PASSWORD
+BOOTSTRAP_ADMIN_DISPLAY_NAME=Administrator
+
+LEGACY_CONTENT_USERNAME=ngohoang
 MEDIA_ROUTE_PREFIX=/media
 ```
 
-Recommended CloudFront behaviors:
+The server will log a warning if `BOOTSTRAP_ADMIN_PASSWORD` is still a weak placeholder. Change it before public launch.
 
-- `Default (*)` -> S3 origin
-- `/api/*` -> Lightsail origin
-- `/media/*` -> Lightsail origin while local fallback media is still served by Express
+### Direct S3 uploads for new media
 
-For CloudFront-backed media, point `VITE_MEDIA_BASE` directly at the CDN origin, for example `https://dxxxxxxxx.cloudfront.net`, and keep seeded local fallback only for development.
+New cover images and inline essay images can now upload directly to S3 through a presigned upload flow.
 
-This keeps the browser on a single origin such as `https://haiku.othuoc.com` when desired, while still allowing media to move to a CDN later without changing frontend code.
+Backend route:
+
+- `POST /api/media/presign`
+
+Required backend environment:
+
+- `S3_UPLOAD_BUCKET`
+- `S3_UPLOAD_REGION`
+- `S3_UPLOAD_PREFIX`
+- `MEDIA_PUBLIC_BASE`
+
+This flow requires CORS on the media bucket, because the browser uploads directly to the presigned S3 URL.
+
+Example bucket CORS:
+
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["PUT", "GET", "HEAD"],
+    "AllowedOrigins": ["https://haiku.othuoc.space"],
+    "ExposeHeaders": ["ETag"]
+  }
+]
+```
+
+If bucket CORS is missing or too strict, frontend uploads will fail even though presigned URLs are generated correctly.
+
+### Backend health check
+
+When the Node API is running directly:
+
+```bash
+curl http://127.0.0.1:4000/api/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+After Caddy and DNS are working:
+
+```bash
+curl https://api.othuoc.space/api/health
+```
+
+### Database migration
+
+The current local setup uses PostgreSQL. A typical local dump command is:
+
+```bash
+pg_dump -Fc -d "postgresql://postgres:postgres@127.0.0.1:5433/haiku" -f haiku.dump
+```
+
+Restore on the Lightsail instance:
+
+```bash
+pg_restore --clean --if-exists --no-owner \
+  -h 127.0.0.1 \
+  -U haiku_app \
+  -d haiku \
+  haiku.dump
+```
+
+### Seed behavior
+
+The backend currently contains hardcoded seed content in [server/index.js](/Users/nguoididay/Projects/Personal%20projects/haiku/server/index.js#L765).
+
+On startup, the API runs:
+
+- `seedIfEmpty(seededPosts)`
+- `seedPostsIfMissing(supplementalJapaneseSeedPosts)`
+- `seedEssaysIfEmpty(SEED_ESSAYS)`
+
+This means a brand new production database will show seed poems and essays before the local database is restored.
+
+### Media migration
+
+The app currently supports three kinds of media references:
+
+- local paths
+- absolute `http/https` URLs
+- `data:` URLs
+
+Frontend handling is in [src/utils/runtime.js](/Users/nguoididay/Projects/Personal%20projects/haiku/src/utils/runtime.js#L1). Absolute URLs already work without additional code changes.
+
+Recommended production migration:
+
+1. upload existing local media files to the media S3 bucket
+2. keep a stable key structure
+3. update `media_assets.source` to point at `https://media.othuoc.space/...`
+
+After that, the frontend will load migrated media directly from the media CDN.
+
+Note: newly inserted images in the editor are still not uploaded to S3 automatically. Inline essay images currently use `data:` URLs in [src/components/RichEssayEditor.vue](/Users/nguoididay/Projects/Personal%20projects/haiku/src/components/RichEssayEditor.vue#L1). A later improvement should replace this with an S3 upload flow using presigned URLs.
+
+### Deployment checklist
+
+1. Request ACM certificate in `us-east-1`
+2. Add DNS validation records in Namecheap
+3. Create S3 buckets
+4. Create CloudFront distributions
+5. Point `haiku.othuoc.space` and `media.othuoc.space` to CloudFront
+6. Build and upload frontend
+7. Create Lightsail instance and static IP
+8. Point `api.othuoc.space` to Lightsail
+9. Install Node, PostgreSQL, PM2, and Caddy
+10. Deploy backend code and environment
+11. Restore PostgreSQL dump
+12. Migrate local media to S3
+13. Validate:
+    - frontend loads
+    - SPA refresh works
+    - login works
+    - API health works
+    - media loads from `media.othuoc.space`
 
 ## Data model
 The longer-term content schema is documented in [docs/data-model.md](/Users/nguoididay/Projects/Personal%20projects/haiku/docs/data-model.md#L1).
 
 ### Customize the configuration
 See [Configuring quasar.config file](https://quasar.dev/quasar-cli-vite/quasar-config-js).
-
-
-
-aws cloudfront create-invalidation \
-  --distribution-id EP23DSG9TP2CV \                
-  --paths "/*"
