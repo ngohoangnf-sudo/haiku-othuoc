@@ -29,6 +29,7 @@
             :src="resolveImage(post.image)"
             alt=""
             aria-hidden="true"
+            crossorigin="anonymous"
           />
           <router-link :to="'/authors/' + post.authorSlug"><h5><p class="right staight page-reading-copy">{{ post.author }}</p></h5></router-link>
         </div>
@@ -50,8 +51,6 @@ import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { initHoverImageEffects } from "assets/hover_image_effect.js";
 import { resolveMediaUrl } from "src/utils/runtime";
-import "assets/js/TweenLite.min.js";
-import "assets/js/Math.js";
 
 const CATEGORY_LABELS = {
   jp: "Haiku Nhật",
@@ -228,6 +227,25 @@ export default defineComponent({
 }
 
 @media screen and (max-width: 40em) {
+  .post-page__item {
+    min-height: auto;
+  }
+
+  .post-page__title {
+    font-size: clamp(2rem, 8vw, 2.8rem);
+    white-space: normal;
+  }
+
+  .post-page__description {
+    padding-top: 0.75rem;
+  }
+
+  .post-page__poem {
+    margin-top: 4.5vh;
+    padding-inline: 0;
+    padding-bottom: 1rem;
+  }
+
   .post-page__poem p {
     white-space: normal;
   }

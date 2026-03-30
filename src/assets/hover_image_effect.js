@@ -1,4 +1,9 @@
 import * as THREE from "three";
+import { gsap, Power4 } from "gsap";
+
+function mapRange(value, inMin, inMax, outMin, outMax) {
+  return ((value - inMin) * (outMax - outMin)) / (inMax - inMin) + outMin;
+}
 
 export function initHoverImageEffects({
   container = document.querySelector("main"),
@@ -8,8 +13,6 @@ export function initHoverImageEffects({
   imageSelector = ".reading-page__poem-source",
   effectKey = "reading-page",
 } = {}) {
-  const tween = globalThis.TweenLite;
-  const ease = globalThis.Power4;
   const items = wrappers
     .filter(Boolean)
     .map((wrapper) => ({
@@ -21,8 +24,7 @@ export function initHoverImageEffects({
   if (
     !items.length ||
     typeof window === "undefined" ||
-    !tween ||
-    !ease
+    window.matchMedia?.("(hover: none), (pointer: coarse)")?.matches
   ) {
     return () => {};
   }
@@ -35,6 +37,7 @@ export function initHoverImageEffects({
       this.textures = new Map();
       this.loadingTextures = new Map();
       this.textureLoader = new THREE.TextureLoader();
+      this.textureLoader.setCrossOrigin("anonymous");
       this.pointer = new THREE.Vector2();
       this.target = new THREE.Vector3();
       this.currentItem = null;
@@ -329,10 +332,11 @@ export function initHoverImageEffects({
         this.plane.visible = true;
         this.onMove(item, event);
 
-        tween.killTweensOf(this.uniforms.uAlpha);
-        tween.to(this.uniforms.uAlpha, 0.9, {
+        gsap.killTweensOf(this.uniforms.uAlpha);
+        gsap.to(this.uniforms.uAlpha, {
+          duration: 0.9,
           value: 0.92,
-          ease: ease.easeOut,
+          ease: Power4.easeOut,
           onUpdate: () => this.requestRender(),
         });
 
@@ -347,10 +351,11 @@ export function initHoverImageEffects({
 
       this.isVisible = false;
       this.currentItem = null;
-      tween.killTweensOf(this.uniforms.uAlpha);
-      tween.to(this.uniforms.uAlpha, 0.5, {
+      gsap.killTweensOf(this.uniforms.uAlpha);
+      gsap.to(this.uniforms.uAlpha, {
+        duration: 0.5,
         value: 0,
-        ease: ease.easeOut,
+        ease: Power4.easeOut,
         onUpdate: () => this.requestRender(),
         onComplete: () => {
           if (!this.isVisible) {
@@ -371,15 +376,16 @@ export function initHoverImageEffects({
       this.pointer.y = -(((event.clientY - viewport.top) / viewport.height) * 2 - 1);
 
       const viewSize = this.getViewSize();
-      const x = this.pointer.x.map(-1, 1, -viewSize.width / 2, viewSize.width / 2);
-      const y = this.pointer.y.map(-1, 1, -viewSize.height / 2, viewSize.height / 2);
+      const x = mapRange(this.pointer.x, -1, 1, -viewSize.width / 2, viewSize.width / 2);
+      const y = mapRange(this.pointer.y, -1, 1, -viewSize.height / 2, viewSize.height / 2);
 
       this.target.set(x, y, 0);
-      tween.killTweensOf(this.plane.position);
-      tween.to(this.plane.position, 1, {
+      gsap.killTweensOf(this.plane.position);
+      gsap.to(this.plane.position, {
+        duration: 1,
         x,
         y,
-        ease: ease.easeOut,
+        ease: Power4.easeOut,
         onUpdate: () => {
           const offset = this.plane.position
             .clone()
@@ -410,8 +416,8 @@ export function initHoverImageEffects({
         this.frameId = 0;
       }
 
-      tween.killTweensOf(this.plane.position);
-      tween.killTweensOf(this.uniforms.uAlpha);
+      gsap.killTweensOf(this.plane.position);
+      gsap.killTweensOf(this.uniforms.uAlpha);
 
       this.geometry.dispose();
       this.material.dispose();

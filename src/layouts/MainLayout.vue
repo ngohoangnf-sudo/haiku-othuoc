@@ -50,9 +50,12 @@ export default defineComponent({
     let scrollbarRafId = 0;
     let scrollbarYTo = null;
     let scrollbarHeightTo = null;
+    let teardownViewportWatcher = null;
     themeStore.hydrateCachedTheme();
 
     const isWritingRoute = () => route.path.startsWith("/write");
+    const isMobilePerformanceMode = () =>
+      window.matchMedia?.("(max-width: 53em), (hover: none), (pointer: coarse)")?.matches ?? false;
 
     const getLightBackgroundKind = () => {
       if (LIGHT_BACKGROUND_VARIANT === "none") {
@@ -170,11 +173,16 @@ export default defineComponent({
       themeStore.setRouteThemeOverride(null);
 
       const currentTheme = themeStore.state.appliedTheme;
+      const mobileMode = isMobilePerformanceMode();
       const showBackground = true;
-      const shouldAnimate = currentTheme === "light" && !isWritingRoute();
+      const shouldAnimate =
+        !mobileMode &&
+        currentTheme === "light" &&
+        !isWritingRoute();
+      const shouldInteract = showBackground && (!mobileMode || currentTheme !== "dark");
 
       backgroundEffect?.setActive(showBackground);
-      backgroundEffect?.setInteractive(showBackground);
+      backgroundEffect?.setInteractive(shouldInteract);
       backgroundEffect?.setAnimated(showBackground && shouldAnimate);
       backgroundEffect?.setTheme(currentTheme);
     };
@@ -229,7 +237,7 @@ export default defineComponent({
     };
 
     const setupScrollbar = () => {
-      if (typeof window === "undefined" || !scrollbarThumb.value) {
+      if (typeof window === "undefined" || !scrollbarThumb.value || isMobilePerformanceMode()) {
         return;
       }
 
@@ -305,6 +313,25 @@ export default defineComponent({
       ensureBackgroundEffect();
       syncBackgroundState();
       teardownScrollbar = setupScrollbar();
+
+      const handleViewportChange = () => {
+        syncBackgroundState();
+
+        if (isMobilePerformanceMode()) {
+          teardownScrollbar?.();
+          teardownScrollbar = null;
+          return;
+        }
+
+        if (!teardownScrollbar) {
+          teardownScrollbar = setupScrollbar();
+        }
+      };
+
+      window.addEventListener("resize", handleViewportChange, { passive: true });
+      teardownViewportWatcher = () => {
+        window.removeEventListener("resize", handleViewportChange);
+      };
     });
 
     watch(
@@ -323,6 +350,7 @@ export default defineComponent({
       themeStore.setRouteThemeOverride(null);
       destroyBackgroundEffect();
       teardownScrollbar?.();
+      teardownViewportWatcher?.();
     });
 
     return {

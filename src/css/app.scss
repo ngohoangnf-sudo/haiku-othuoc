@@ -907,6 +907,85 @@ a:focus {
   }
 }
 
+@media screen and (max-width: 53em) {
+  .page__scrollbar {
+    display: none;
+  }
+
+  .content {
+    width: 100%;
+    margin: 10vh 0 14vh;
+  }
+
+  .content--offset {
+    grid-template-columns: minmax(0, 1fr);
+    grid-gap: 12vh 0;
+  }
+
+  .content__item,
+  .content--alternate .content__item,
+  .content__item--right {
+    width: 100%;
+    max-width: none;
+    margin: 0 0 12vh;
+    justify-self: stretch;
+  }
+
+  .content__item--expand,
+  .content__item--expand:nth-child(even) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .content--offset .content__item:nth-child(even),
+  .content--alternate .content__item:nth-child(even) {
+    align-self: stretch;
+    margin-left: 0;
+    margin-bottom: 12vh;
+  }
+
+  .content__item-title {
+    margin-top: calc(var(--size-title) * -0.35);
+    padding: 0;
+  }
+
+  .content__item-description,
+  .content__item--wide:nth-child(even) .content__item-description,
+  .content__item--expand .content__item-description,
+  .content__item--expand:nth-child(even) .content__item-description {
+    grid-area: 3 / 1 / 4 / 2;
+    width: 100%;
+    padding: 1rem 1rem 0;
+    text-align: left;
+    justify-self: stretch;
+  }
+
+  .content__item-description p,
+  .content__item-poem p {
+    width: auto;
+  }
+
+  .content__item-poem,
+  .content__item-poem.without-image {
+    grid-area: 3 / 1 / 4 / 2;
+    width: 100%;
+    margin-left: 0;
+    margin-top: 3rem;
+    padding: 1rem 1rem 0;
+  }
+
+  .content__item-title--layer {
+    padding-inline: 1rem;
+  }
+
+  .content__item-imgwrap {
+    width: 100%;
+  }
+
+  .content__item-img {
+    opacity: 0.84;
+  }
+}
+
 @media screen and (max-width: 40em) {
   .content__item--expand .content__item-imgwrap,
   .content__item--expand:nth-child(even) .content__item-imgwrap {

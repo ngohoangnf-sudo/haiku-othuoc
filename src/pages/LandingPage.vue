@@ -24,7 +24,7 @@
           class="link w-inline-block -col-or-link"
         >
           <p v-for="(line, index) in featuredPoem.lines" :key="index">{{ line }}</p>
-          <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" />
+          <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" crossorigin="anonymous" />
         </a>
       </div>
     </div>
@@ -93,10 +93,7 @@ import _3 from "assets/3.jpg";
 import _4 from "assets/4.jpg";
 import _5 from "assets/5.jpg";
 import _7 from "assets/7.jpg";
-import "assets/imagesloaded.pkgd.min.js";
 import { initLandingPage } from "assets/landing_page.js";
-import "assets/js/TweenLite.min.js";
-import "assets/js/Math.js";
 import { API_BASE, resolveMediaUrl } from "src/utils/runtime";
 
 export default defineComponent({

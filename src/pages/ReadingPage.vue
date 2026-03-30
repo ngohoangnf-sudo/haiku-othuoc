@@ -62,6 +62,7 @@
             :src="resolveImage(poem.image)"
             alt=""
             aria-hidden="true"
+            crossorigin="anonymous"
           />
         </div>
       </div>
@@ -88,8 +89,6 @@ import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { initHoverImageEffects } from "assets/hover_image_effect.js";
 import { resolveMediaUrl } from "src/utils/runtime";
-import "assets/js/TweenLite.min.js";
-import "assets/js/Math.js";
 
 export default defineComponent({
   name: "ReadingPage",
@@ -616,19 +615,21 @@ export default defineComponent({
 @media screen and (max-width: 40em) {
   .reading-page {
     grid-template-columns: minmax(0, 1fr);
-    row-gap: 12vh;
-    margin-top: 12vh;
+    row-gap: 9vh;
+    margin-top: 10vh;
+    margin-bottom: 14vh;
   }
 
   .reading-page__item {
     width: 100%;
-    min-height: 56vh;
+    min-height: auto;
   }
 
   .reading-page__hero {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto auto auto;
-    row-gap: 2.75rem;
+    row-gap: 2rem;
+    margin-bottom: 1vh;
   }
 
   .reading-page__hero-title,
@@ -639,11 +640,12 @@ export default defineComponent({
 
   .reading-page__hero-nav {
     grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
+    gap: 0.3rem;
   }
 
   .reading-page__hero-tab {
-    padding-block: 0.6rem;
+    padding-block: 0.5rem;
+    font-size: 1rem;
   }
 
   .reading-page__item--left,
@@ -654,12 +656,15 @@ export default defineComponent({
 
   .reading-page__poem {
     width: 100%;
-    margin-top: 8vh;
+    margin-top: 5vh;
     padding-inline: 0;
+    padding-bottom: 1rem;
   }
 
   .reading-page__title {
     padding-inline: 0;
+    font-size: clamp(1.9rem, 8vw, 2.5rem);
+    white-space: normal;
   }
 
   .reading-page__poem p {
