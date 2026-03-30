@@ -26,6 +26,10 @@ export default route(function (/* { store, ssrContext } */) {
         return savedPosition
       }
 
+      if (to.path === from.path) {
+        return false
+      }
+
       if (isReadingRoute(to.path) && isReadingRoute(from.path)) {
         return false
       }
@@ -50,6 +54,13 @@ export default route(function (/* { store, ssrContext } */) {
     }
 
     await authStore.ensureSession()
+
+    if (to.meta.requiresEditor && !authStore.canEdit()) {
+      return {
+        path: '/login',
+        query: { redirect: to.fullPath }
+      }
+    }
 
     if (to.meta.requiresAdmin && !authStore.isAdmin()) {
       return {

@@ -70,6 +70,10 @@ async function fetchPagedPosts(options = {}) {
     params.set("authorSlug", options.authorSlug);
   }
 
+  if (options.kind) {
+    params.set("kind", options.kind);
+  }
+
   if (options.page !== undefined) {
     params.set("page", String(options.page));
   }
@@ -138,6 +142,10 @@ async function fetchPagedEssays(options = {}) {
     params.set("authorSlug", options.authorSlug);
   }
 
+  if (options.kind) {
+    params.set("kind", options.kind);
+  }
+
   if (options.tagSlug) {
     params.set("tagSlug", options.tagSlug);
   }
@@ -184,9 +192,13 @@ async function loadEssayTags(options = {}) {
       : "published";
 
   const query = status && status !== "published" ? `?status=${encodeURIComponent(status)}` : "";
+  const kindQuery =
+    typeof options === "object" && typeof options.kind === "string" && options.kind.trim()
+      ? `${query ? "&" : "?"}kind=${encodeURIComponent(options.kind.trim())}`
+      : "";
 
   try {
-    const res = await fetch(`${API_BASE}/essay-tags${query}`, {
+    const res = await fetch(`${API_BASE}/essay-tags${query}${kindQuery}`, {
       headers: authStore.getAuthHeaders(),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);

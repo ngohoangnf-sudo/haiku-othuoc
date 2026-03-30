@@ -6,14 +6,6 @@ const routes = [
   },
 
   {
-    path: "/light",
-    component: () => import("layouts/MainLayout.vue"),
-    children: [
-      { path: "", component: () => import("pages/LandingPageLight.vue") },
-    ],
-  },
-
-  {
     path: "/read",
     component: () => import("layouts/MainLayout.vue"),
     children: [
@@ -51,11 +43,53 @@ const routes = [
   },
 
   {
+    path: "/profile",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [
+      {
+        path: "",
+        component: () => import("pages/ProfilePage.vue"),
+        meta: { requiresEditor: true },
+      },
+    ],
+  },
+
+  {
     path: "/authors",
     component: () => import("layouts/MainLayout.vue"),
     children: [
       { path: "", component: () => import("pages/AuthorPage.vue") },
       { path: ":slug", component: () => import("pages/AuthorPage.vue") },
+    ],
+  },
+
+  {
+    path: "/haiku-number",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [
+      {
+        path: "",
+        component: () => import("pages/ComingSoonPage.vue"),
+        meta: {
+          title: "Haiku #",
+          message: "Mục này đang được hoàn thiện. Coming soon.",
+        },
+      },
+    ],
+  },
+
+  {
+    path: "/library",
+    component: () => import("layouts/MainLayout.vue"),
+    children: [
+      {
+        path: "",
+        component: () => import("pages/ComingSoonPage.vue"),
+        meta: {
+          title: "Thư viện",
+          message: "Không gian lưu trữ và tra cứu đang được xây dựng. Coming soon.",
+        },
+      },
     ],
   },
 

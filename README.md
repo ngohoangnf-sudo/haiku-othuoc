@@ -117,3 +117,9 @@ The longer-term content schema is documented in [docs/data-model.md](/Users/nguo
 
 ### Customize the configuration
 See [Configuring quasar.config file](https://quasar.dev/quasar-cli-vite/quasar-config-js).
+
+
+
+aws cloudfront create-invalidation \
+  --distribution-id EP23DSG9TP2CV \                
+  --paths "/*"

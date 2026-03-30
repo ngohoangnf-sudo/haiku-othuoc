@@ -51,6 +51,7 @@ export async function initLiquidInkBackground({
     uPointer: { value: new THREE.Vector2(0.5, 0.5) },
     uPointerShift: { value: new THREE.Vector2(0, 0) },
     uAlpha: { value: 1 },
+    uThemeMix: { value: 0 },
   };
 
   const material = new THREE.ShaderMaterial({
@@ -74,6 +75,7 @@ export async function initLiquidInkBackground({
       uniform vec2 uPointer;
       uniform vec2 uPointerShift;
       uniform float uAlpha;
+      uniform float uThemeMix;
 
       mat2 rotate2D(float angle) {
         float s = sin(angle);
@@ -129,14 +131,37 @@ export async function initLiquidInkBackground({
         return r;
       }
 
+      float contourLine(float value, float width) {
+        float line = abs(fract(value) - 0.5) * 2.0;
+        return 1.0 - smoothstep(width, width + 0.08, line);
+      }
+
+      float paperHeightField(vec2 pos) {
+        vec2 paperPoint = rotate2D(-0.18) * pos * vec2(1.0, 1.12);
+        vec2 paperFlow = warp(paperPoint * 0.32, 0.64);
+        vec2 paperField = paperPoint + paperFlow * 0.08;
+
+        float drift = fbm(
+          paperField * 0.42 + vec2(uTime * 0.0011, -uTime * 0.0009)
+        );
+        float wrinkleA =
+          sin(paperField.y * 6.2 + sin(paperField.x * 1.18 + paperFlow.x * 0.42) * 0.92) * 0.5 + 0.5;
+        float wrinkleB =
+          sin(paperField.y * 3.7 - 0.7 + sin(paperField.x * 0.84 - paperFlow.y * 0.3) * 0.66) * 0.5 + 0.5;
+        float body = smoothstep(0.08, 0.94, wrinkleA * 0.72 + wrinkleB * 0.28);
+
+        return body * 0.86 + drift * 0.14;
+      }
+
       void main() {
         vec2 uv = vUv;
         vec2 aspect = vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
         vec2 centered = (uv - 0.5) * aspect;
 
         vec2 pointer = (uPointer - 0.5) * aspect;
-        float pointerFalloff = exp(-4.0 * distance(centered, pointer));
-        vec2 wake = uPointerShift * pointerFalloff * 0.5;
+        float pointerDistance = distance(centered, pointer);
+        float pointerFalloff = exp(-4.0 * pointerDistance);
+        vec2 wake = uPointerShift * pointerFalloff * mix(0.5, 0.34, uThemeMix);
 
         vec2 p = centered * 2.4;
         p += wake;
@@ -154,21 +179,123 @@ export async function initLiquidInkBackground({
         float bloom = smoothstep(0.2, 0.94, inkBody * 0.72 + inkShadow * 0.35);
         float filaments = smoothstep(0.3, 0.9, tendrils * 0.9 + eddies * 0.3);
 
-        vec3 deep = vec3(0.11, 0.105, 0.115);
-        vec3 mist = vec3(0.22, 0.205, 0.2);
-        vec3 glow = vec3(0.33, 0.305, 0.285);
+        vec2 paperPoint = rotate2D(-0.18) * centered * vec2(1.0, 1.12);
+        vec2 paperFlow = warp(paperPoint * 0.32, 0.64);
+        vec2 paperField = paperPoint + paperFlow * 0.08;
 
-        vec3 color = mix(deep, mist, bloom * 0.4);
-        color += glow * filaments * 0.12;
-        color -= vec3(0.03, 0.028, 0.028) * smoothstep(0.28, 0.92, inkShadow);
+        float paperDrift = fbm(
+          paperField * 0.42 + vec2(uTime * 0.0011, -uTime * 0.0009)
+        );
+        float paperTexture = fbm(
+          paperField * 0.82 + vec2(uTime * 0.0022, -uTime * 0.0018)
+        );
+        float paperTextureDetail = fbm(
+          (rotate2D(-0.08) * paperField) * 1.46 - paperFlow * 0.06 - vec2(uTime * 0.0018, uTime * 0.0013)
+        );
+        float paperFiber = ridge(
+          paperField * 4.4 + vec2(uTime * 0.004, -uTime * 0.003)
+        );
+        float paperFiberCross = ridge(
+          (rotate2D(0.42) * paperField) * 5.8 + vec2(uTime * 0.0026, -uTime * 0.0021)
+        );
+        float paperPulp = fbm(
+          (rotate2D(0.36) * paperField) * 2.6 + vec2(3.4, 1.7)
+        );
+        float paperTooth = fbm(
+          paperField * 6.6 + vec2(7.2, 4.1)
+        );
 
-        float vignette = smoothstep(1.35, 0.18, length(centered));
-        float grain = (hash(gl_FragCoord.xy + uTime * 17.0) - 0.5) * 0.035;
+        float paperWrinkleA =
+          sin(paperField.y * 6.2 + sin(paperField.x * 1.18 + paperFlow.x * 0.42) * 0.92) * 0.5 + 0.5;
+        float paperWrinkleB =
+          sin(paperField.y * 3.7 - 0.7 + sin(paperField.x * 0.84 - paperFlow.y * 0.3) * 0.66) * 0.5 + 0.5;
+        float paperBody = smoothstep(0.08, 0.94, paperWrinkleA * 0.72 + paperWrinkleB * 0.28);
+        float paperRidge =
+          contourLine((paperField.y + paperDrift * 0.08) * 6.2 + paperTexture * 0.28, 0.24) * 0.08;
+        float paperHeight = paperHeightField(centered);
+        float paperHeightDx = paperHeightField(centered + vec2(0.02, 0.0)) - paperHeight;
+        float paperHeightDy = paperHeightField(centered + vec2(0.0, 0.02)) - paperHeight;
+        vec3 paperNormal = normalize(vec3(-paperHeightDx * 7.2, -paperHeightDy * 7.2, 1.0));
+        vec3 paperLightDir = normalize(vec3(-0.34, 0.48, 0.8));
+        float paperLight = clamp(dot(paperNormal, paperLightDir), 0.0, 1.0);
+        float paperOcclusion = clamp((1.0 - paperLight) * 0.54, 0.0, 1.0);
+
+        float paperShimmer = smoothstep(
+          0.24,
+          0.94,
+          0.5 + 0.5 * (paperTexture * 0.36 + paperTextureDetail * 0.22 + paperWrinkleA * 0.18)
+        );
+        float paperFiberCoarse =
+          hash(floor((paperField + vec2(9.2, 4.7)) * 220.0)) - 0.5;
+        float paperFiberFine =
+          hash(floor((rotate2D(0.34) * paperField + vec2(3.1, 7.2)) * 460.0)) - 0.5;
+        float paperGrain =
+          paperFiberCoarse * 0.52 +
+          paperFiberFine * 0.48;
+
+        vec3 deep = mix(
+          vec3(0.11, 0.105, 0.115),
+          vec3(0.93, 0.93, 0.928),
+          uThemeMix
+        );
+        vec3 mist = mix(
+          vec3(0.22, 0.205, 0.2),
+          vec3(0.82, 0.82, 0.818),
+          uThemeMix
+        );
+        vec3 glow = mix(
+          vec3(0.33, 0.305, 0.285),
+          vec3(0.69, 0.69, 0.688),
+          uThemeMix
+        );
+        vec3 shadowTint = mix(
+          vec3(0.03, 0.028, 0.028),
+          vec3(0.09, 0.09, 0.088),
+          uThemeMix
+        );
+        vec3 paperBaseColor = vec3(0.982, 0.979, 0.972);
+        vec3 paperMidColor = vec3(0.942, 0.935, 0.922);
+        vec3 paperShadowColor = vec3(0.868, 0.854, 0.828);
+        vec3 paperHighlightColor = vec3(0.995, 0.994, 0.988);
+
+        vec3 liquidColor = mix(deep, mist, bloom * 0.4);
+        liquidColor += glow * filaments * 0.12;
+        liquidColor -= shadowTint * smoothstep(0.28, 0.92, inkShadow);
+
+        vec3 paperColor = mix(
+          paperBaseColor,
+          paperMidColor,
+          clamp(paperHeight * 0.68 + paperTexture * 0.12, 0.0, 1.0)
+        );
+        paperColor = mix(
+          paperColor,
+          paperShadowColor,
+          clamp(paperOcclusion * 0.7 + (1.0 - paperHeight) * 0.04, 0.0, 1.0)
+        );
+        paperColor *= mix(0.92, 1.03, paperLight);
+        paperColor += paperHighlightColor * paperRidge * 0.14;
+        paperColor += paperHighlightColor * paperShimmer * 0.025;
+        paperColor += paperHighlightColor * clamp(paperLight - 0.62, 0.0, 1.0) * 0.045;
+        paperColor -= vec3(0.07, 0.064, 0.054) * paperOcclusion * 0.18;
+        paperColor -= vec3(0.028, 0.025, 0.02) * paperFiber * 0.032;
+        paperColor -= vec3(0.018, 0.016, 0.012) * paperFiberCross * 0.024;
+        paperColor += vec3(paperPulp - 0.5) * 0.014;
+        paperColor += vec3(paperTooth - 0.5) * 0.01;
+        paperColor += vec3(paperGrain) * (0.03 + paperHeight * 0.007);
+
+        vec3 color = mix(liquidColor, paperColor, uThemeMix);
+
+        float vignette = mix(
+          smoothstep(1.35, 0.18, length(centered)),
+          smoothstep(1.95, -0.18, length(centered)) * 0.998 + 0.002,
+          uThemeMix
+        );
+        float grain = (hash(gl_FragCoord.xy + uTime * 17.0) - 0.5) * mix(0.035, 0.012, uThemeMix);
 
         color *= vignette;
         color += grain;
 
-        gl_FragColor = vec4(color, 0.86 * uAlpha);
+        gl_FragColor = vec4(color, mix(0.86, 0.48, uThemeMix) * uAlpha);
       }
     `,
   });
@@ -185,8 +312,10 @@ export async function initLiquidInkBackground({
   let lastTick = performance.now();
   let lastFrameTime = performance.now();
   const pointerTarget = new THREE.Vector2(0.5, 0.5);
+  let themeTarget = 0;
   const settleThreshold = 0.0015;
   const alphaThreshold = 0.01;
+  const themeThreshold = 0.002;
 
   const renderFrame = () => {
     renderer.render(scene, camera);
@@ -238,6 +367,7 @@ export async function initLiquidInkBackground({
 
     const targetAlpha = active ? 1 : 0;
     uniforms.uAlpha.value += (targetAlpha - uniforms.uAlpha.value) * 0.06;
+    uniforms.uThemeMix.value += (themeTarget - uniforms.uThemeMix.value) * 0.07;
 
     renderFrame();
 
@@ -249,7 +379,8 @@ export async function initLiquidInkBackground({
     const shouldContinue =
       pointerTarget.distanceTo(uniforms.uPointer.value) > settleThreshold ||
       uniforms.uPointerShift.value.length() > settleThreshold ||
-      Math.abs(targetAlpha - uniforms.uAlpha.value) > alphaThreshold;
+      Math.abs(targetAlpha - uniforms.uAlpha.value) > alphaThreshold ||
+      Math.abs(themeTarget - uniforms.uThemeMix.value) > themeThreshold;
 
     if (shouldContinue) {
       rafId = window.requestAnimationFrame(tick);
@@ -339,6 +470,10 @@ export async function initLiquidInkBackground({
       }
 
       stopLoop();
+      startLoop();
+    },
+    setTheme(nextTheme) {
+      themeTarget = nextTheme === "light" ? 1 : 0;
       startLoop();
     },
     destroy() {

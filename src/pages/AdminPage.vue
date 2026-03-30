@@ -313,7 +313,7 @@ export default defineComponent({
 .admin-page__lead,
 .admin-page__status,
 .admin-page__empty {
-  color: rgba(177, 165, 159, 0.84);
+  color: var(--color-muted);
 }
 
 .admin-page__status--error {
@@ -324,11 +324,9 @@ export default defineComponent({
 .admin-user-card,
 .activity-item {
   padding: 1.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-soft);
   border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
-    rgba(27, 25, 25, 0.38);
+  background: var(--surface-panel-bg);
 }
 
 .admin-form,
@@ -344,25 +342,25 @@ export default defineComponent({
 }
 
 .admin-form__label {
-  color: rgba(177, 165, 159, 0.74);
+  color: var(--color-muted-soft);
 }
 
 .admin-form__input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #b1a59f;
+  background: var(--surface-input-bg);
+  border: 1px solid var(--surface-input-border);
+  color: var(--color-text);
   padding: 0.8rem 1rem;
   border-radius: 8px;
   font: inherit;
 }
 
 .admin-form__input:focus {
-  outline: 1px solid rgba(177, 165, 159, 0.42);
-  border-color: rgba(177, 165, 159, 0.28);
-  background: rgba(255, 255, 255, 0.055);
+  outline: 1px solid var(--focus-outline);
+  border-color: var(--focus-border);
+  background: var(--surface-input-focus-bg);
   box-shadow:
-    0 0 0 3px rgba(177, 165, 159, 0.08),
+    0 0 0 3px var(--focus-ring),
     0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -383,9 +381,9 @@ export default defineComponent({
 .admin-form__submit {
   min-width: 11rem;
   padding: 0.8rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: #b1a59f;
+  border: 1px solid var(--surface-button-border);
+  background: var(--surface-button-bg);
+  color: var(--color-text);
   border-radius: 8px;
   cursor: pointer;
   font: inherit;
@@ -411,7 +409,7 @@ export default defineComponent({
 
 .admin-user-card__subcopy,
 .activity-item__meta {
-  color: rgba(177, 165, 159, 0.72);
+  color: var(--color-muted-soft);
 }
 
 .admin-user-card__subcopy,

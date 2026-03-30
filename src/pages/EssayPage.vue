@@ -7,8 +7,9 @@
     <div v-else-if="essay" class="essay-page__content">
       <header class="essay-page__hero">
         <p v-if="essay.tags?.length" class="essay-page__eyebrow page-reading-copy">
-          {{ essay.tags.map((tag) => tag.label).join(" · ") }}
+          {{ [formatKind(essay.kind), ...essay.tags.map((tag) => tag.label)].join(" · ") }}
         </p>
+        <p v-else class="essay-page__eyebrow page-reading-copy">{{ formatKind(essay.kind) }}</p>
         <h1 class="essay-page__title page-reading-h2 page-heading-with-rule">{{ essay.title }}</h1>
         <p v-if="essay.summary" class="essay-page__summary page-reading-copy">{{ essay.summary }}</p>
         <div class="essay-page__meta page-reading-copy">
@@ -29,15 +30,7 @@
         <img :src="resolveImage(essay.image)" :alt="essay.title" />
       </figure>
 
-      <section class="essay-page__body">
-        <p
-          v-for="(paragraph, index) in bodyParagraphs"
-          :key="`${essay.id}-${index}`"
-          class="essay-page__paragraph page-reading-copy"
-        >
-          {{ paragraph }}
-        </p>
-      </section>
+      <section class="essay-page__body page-reading-copy" v-html="bodyHtml"></section>
     </div>
 
     <div v-else class="essay-page__state">
@@ -52,6 +45,7 @@ import { computed, defineComponent, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { resolveMediaUrl } from "src/utils/runtime";
+import { sanitizeEssayHtml } from "src/utils/essayContent";
 
 export default defineComponent({
   name: "EssayPage",
@@ -70,13 +64,7 @@ export default defineComponent({
       () => fetchCurrent()
     );
 
-    const bodyParagraphs = computed(() => {
-      if (!essay.value?.body) return [];
-      return essay.value.body
-        .split(/\n\s*\n/)
-        .map((paragraph) => paragraph.trim())
-        .filter(Boolean);
-    });
+    const bodyHtml = computed(() => sanitizeEssayHtml(essay.value?.body || ""));
 
     const formatDate = (value) => {
       if (!value) return "";
@@ -92,11 +80,14 @@ export default defineComponent({
       }
     };
 
+    const formatKind = (value = "") => (value === "research" ? "Nghiên cứu" : "Bình luận");
+
     return {
       essay,
       loading,
-      bodyParagraphs,
+      bodyHtml,
       formatDate,
+      formatKind,
       resolveImage: resolveMediaUrl,
     };
   },
@@ -132,7 +123,7 @@ export default defineComponent({
 .essay-page__meta,
 .essay-page__back {
   margin: 0;
-  color: rgba(177, 165, 159, 0.82);
+  color: var(--color-muted);
 }
 
 .essay-page__title {
@@ -153,7 +144,7 @@ export default defineComponent({
 .essay-page__cover {
   margin: 0;
   overflow: hidden;
-  background: rgba(0, 0, 0, 0.2);
+  background: var(--surface-subtle-bg);
 }
 
 .essay-page__cover img {
@@ -170,10 +161,64 @@ export default defineComponent({
   max-width: 44rem;
 }
 
-.essay-page__paragraph {
+.essay-page__body :deep(p),
+.essay-page__body :deep(h2),
+.essay-page__body :deep(h3),
+.essay-page__body :deep(blockquote),
+.essay-page__body :deep(ul),
+.essay-page__body :deep(hr),
+.essay-page__body :deep(figure) {
   margin: 0;
-  color: rgba(177, 165, 159, 0.92);
-  white-space: pre-line;
+}
+
+.essay-page__body :deep(p + p),
+.essay-page__body :deep(h2 + p),
+.essay-page__body :deep(h3 + p),
+.essay-page__body :deep(p + h2),
+.essay-page__body :deep(p + h3),
+.essay-page__body :deep(p + ul),
+.essay-page__body :deep(ul + p),
+.essay-page__body :deep(blockquote + p),
+.essay-page__body :deep(img + p) {
+  margin-top: 1.15rem;
+}
+
+.essay-page__body :deep(h2),
+.essay-page__body :deep(h3) {
+  font-family: var(--font-title);
+  font-weight: var(--font-weight-title);
+  color: var(--color-title);
+  line-height: 1.1;
+}
+
+.essay-page__body :deep(h2) {
+  font-size: 1.8rem;
+}
+
+.essay-page__body :deep(h3) {
+  font-size: 1.4rem;
+}
+
+.essay-page__body :deep(ul) {
+  padding-left: 1.3rem;
+}
+
+.essay-page__body :deep(blockquote) {
+  padding-left: 1rem;
+  border-left: 1px solid var(--border-regular);
+  color: var(--color-description);
+}
+
+.essay-page__body :deep(hr) {
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+}
+
+.essay-page__body :deep(img) {
+  display: block;
+  width: min(100%, 42rem);
+  margin: 1.2rem 0;
+  border-radius: 16px;
 }
 
 @media (max-width: 640px) {

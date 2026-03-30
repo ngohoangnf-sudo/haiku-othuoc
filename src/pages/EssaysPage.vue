@@ -2,7 +2,25 @@
   <div class="essay-index">
     <section class="essay-index__hero">
       <h1 class="essay-index__title page-reading-h2 page-heading-with-rule">Nghĩ</h1>
-      <p class="essay-index__lead page-reading-copy">Bài luận & ghi chép</p>
+      <p class="essay-index__lead page-reading-copy">Nghiên cứu & bình luận</p>
+      <div class="essay-index__kind-switch" role="tablist" aria-label="Chọn mục của trang Nghĩ">
+        <button
+          class="essay-index__kind-tab"
+          :class="{ 'essay-index__kind-tab--active': selectedKind === 'research' }"
+          type="button"
+          @click="selectedKind = 'research'"
+        >
+          <span class="essay-index__kind-tab-label">Nghiên cứu</span>
+        </button>
+        <button
+          class="essay-index__kind-tab"
+          :class="{ 'essay-index__kind-tab--active': selectedKind === 'commentary' }"
+          type="button"
+          @click="selectedKind = 'commentary'"
+        >
+          <span class="essay-index__kind-tab-label">Bình luận</span>
+        </button>
+      </div>
       <div class="essay-index__controls">
         <label class="essay-index__search">
           <span class="essay-index__search-icon" aria-hidden="true">⌕</span>
@@ -12,15 +30,6 @@
             class="essay-index__search-input"
             placeholder="Tìm kiếm"
             aria-label="Tìm bài luận"
-          />
-        </label>
-        <label class="essay-index__filter">
-          <span class="essay-index__filter-label">Tác giả</span>
-          <ElegantSelect
-            v-model="selectedAuthorSlug"
-            class="essay-index__filter-select"
-            :options="authorOptions"
-            aria-label="Lọc theo tác giả"
           />
         </label>
         <label class="essay-index__filter">
@@ -38,49 +47,62 @@
       <p v-else class="essay-index__status page-reading-copy">{{ totalEssays }} bài phù hợp.</p>
     </section>
 
-    <section v-if="essays.length" class="essay-index__list">
-      <article v-for="essay in essays" :key="essay.id" class="essay-card">
-        <router-link :to="`/essays/${essay.slug}`" class="essay-card__inner">
-          <div v-if="essay.image" class="essay-card__cover">
-            <img :src="resolveImage(essay.image)" :alt="essay.title" />
-          </div>
-          <div class="essay-card__body">
-            <div class="essay-card__meta">
-              <span v-if="essay.author">{{ essay.author }}</span>
-              <span v-if="essay.author && essay.publishedAt" aria-hidden="true">•</span>
-              <span v-if="essay.publishedAt">{{ formatDate(essay.publishedAt) }}</span>
+    <div ref="essayContentRegion" class="essay-index__content-region">
+      <section v-if="essays.length" class="essay-index__list">
+        <article v-for="essay in essays" :key="essay.id" ref="essayCards" class="essay-card">
+          <router-link :to="`/essays/${essay.slug}`" class="essay-card__inner">
+            <div v-if="essay.image" class="essay-card__cover">
+              <img :src="resolveImage(essay.image)" :alt="essay.title" />
             </div>
-            <h2 class="essay-card__title">{{ essay.title }}</h2>
-            <p class="essay-card__summary">{{ essay.summary || excerpt(essay.body) }}</p>
-            <div v-if="essay.tags?.length" class="essay-card__tags">
-              <span v-for="tag in essay.tags" :key="tag.slug" class="essay-card__tag">
-                {{ tag.label }}
-              </span>
+            <div class="essay-card__body">
+              <div class="essay-card__meta">
+                <span>{{ formatKind(essay.kind) }}</span>
+                <span aria-hidden="true">•</span>
+                <span v-if="essay.author">{{ essay.author }}</span>
+                <span v-if="essay.author && essay.publishedAt" aria-hidden="true">•</span>
+                <span v-if="essay.publishedAt">{{ formatDate(essay.publishedAt) }}</span>
+              </div>
+              <h2 class="essay-card__title">{{ essay.title }}</h2>
+              <p class="essay-card__summary">{{ essay.summary || excerpt(essay.body) }}</p>
+              <div v-if="essay.tags?.length" class="essay-card__tags">
+                <span v-for="tag in essay.tags" :key="tag.slug" class="essay-card__tag">
+                  {{ tag.label }}
+                </span>
+              </div>
             </div>
-          </div>
-        </router-link>
-      </article>
-      <div
-        v-if="hasMoreEssays"
-        ref="essayLoadMoreTrigger"
-        class="essay-index__sentinel"
-        aria-hidden="true"
-      ></div>
-    </section>
+          </router-link>
+        </article>
+        <div
+          v-if="hasMoreEssays"
+          ref="essayLoadMoreTrigger"
+          class="essay-index__sentinel"
+          aria-hidden="true"
+        ></div>
+      </section>
 
-    <section v-else-if="!loading" class="essay-index__empty">
-      <p class="page-reading-copy">
-        {{ hasFilters ? "Không tìm thấy bài luận phù hợp." : "Chưa có bài luận nào được xuất bản." }}
-      </p>
-    </section>
+      <section v-else-if="!loading" class="essay-index__empty">
+        <p class="page-reading-copy">
+          {{ hasFilters ? "Không tìm thấy bài luận phù hợp." : "Chưa có bài luận nào được xuất bản." }}
+        </p>
+      </section>
+    </div>
   </div>
 </template>
 
 <script>
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import ElegantSelect from "components/ElegantSelect.vue";
 import blogStore from "src/stores/blogStore";
 import { resolveMediaUrl } from "src/utils/runtime";
+import {
+  MOTION_PRESETS,
+  animateBlockHeight,
+  animateGridEnterByRows,
+  animateGridExit,
+  killMotion,
+} from "src/utils/motion";
+import { excerptEssayContent } from "src/utils/essayContent";
 
 export default defineComponent({
   name: "EssaysPage",
@@ -88,9 +110,12 @@ export default defineComponent({
     ElegantSelect,
   },
   setup() {
+    const route = useRoute();
+    const router = useRouter();
     const PAGE_SIZE = 5;
+    const normalizeKind = (value = "") => (value === "commentary" ? "commentary" : "research");
+    const selectedKind = ref(normalizeKind(route.query.kind));
     const essayQuery = ref("");
-    const selectedAuthorSlug = ref("");
     const selectedTagSlug = ref("");
     const essays = ref([]);
     const totalEssays = ref(0);
@@ -99,15 +124,16 @@ export default defineComponent({
     const essaysLoaded = ref(false);
     const loading = ref(false);
     const error = ref("");
+    const essayCards = ref([]);
     const essayLoadMoreTrigger = ref(null);
+    const essayContentRegion = ref(null);
     const hasMoreEssays = computed(() => essayPage.value < essayTotalPages.value);
-    const hasFilters = computed(() =>
-      Boolean(essayQuery.value.trim() || selectedAuthorSlug.value || selectedTagSlug.value)
-    );
+    const hasFilters = computed(() => Boolean(essayQuery.value.trim() || selectedTagSlug.value));
     let essayLoadMoreObserver = null;
     let essaySearchTimer = null;
     let essayRequestId = 0;
     let pendingEssayReset = false;
+    let essayBatchStartIndex = 0;
 
     const detachEssayLoadMoreObserver = () => {
       if (essayLoadMoreObserver) {
@@ -145,7 +171,66 @@ export default defineComponent({
       essayLoadMoreObserver.observe(essayLoadMoreTrigger.value);
     };
 
-    const loadEssaysPage = async ({ reset = false } = {}) => {
+    const getEssayNodes = () => essayCards.value || [];
+
+    const animateEssayBatch = async (startIndex = 0) => {
+      await nextTick();
+      const nodes = getEssayNodes().slice(startIndex);
+      await animateGridEnterByRows(nodes, {
+        columns: 1,
+        ...MOTION_PRESETS.list.enter,
+        rowStagger: 0.14,
+        fromY: 14,
+      });
+    };
+
+    const animateEssayReset = async () => {
+      const nodes = getEssayNodes();
+      if (!nodes.length) {
+        return;
+      }
+
+      await animateGridExit(nodes, {
+        ...MOTION_PRESETS.list.exit,
+        duration: 0.38,
+        y: 8,
+      });
+    };
+
+    const hideEssayNodesForEnter = () => {
+      const nodes = getEssayNodes();
+      nodes.forEach((node) => {
+        node.style.opacity = "0";
+        node.style.transform = "translateY(14px)";
+      });
+    };
+
+    const animateEssayCollectionSwap = async (task) => {
+      const region = essayContentRegion.value;
+      const fromHeight = region?.offsetHeight || 0;
+
+      if (fromHeight > 0 && region) {
+        region.style.height = `${fromHeight}px`;
+        region.style.overflow = "hidden";
+      }
+
+      await task();
+      await nextTick();
+
+      hideEssayNodesForEnter();
+
+      const toHeight = region?.scrollHeight || 0;
+      if (region && fromHeight > 0 && toHeight > 0) {
+        await animateBlockHeight(region, fromHeight, toHeight, { duration: 0.5 });
+      } else if (region) {
+        region.style.removeProperty("height");
+        region.style.removeProperty("overflow");
+      }
+
+      await animateEssayBatch(0);
+    };
+
+    const loadEssaysPage = async ({ reset = false, animate = true } = {}) => {
       if (loading.value) {
         if (reset) {
           pendingEssayReset = true;
@@ -161,14 +246,15 @@ export default defineComponent({
       loading.value = true;
       error.value = "";
       const requestId = ++essayRequestId;
+      essayBatchStartIndex = reset ? 0 : essays.value.length;
 
       try {
         const data = await blogStore.fetchPagedEssays({
           page: nextPage,
           pageSize: PAGE_SIZE,
+          kind: selectedKind.value,
           status: "published",
           search: essayQuery.value.trim(),
-          authorSlug: selectedAuthorSlug.value,
           tagSlug: selectedTagSlug.value,
         });
 
@@ -183,6 +269,9 @@ export default defineComponent({
         essayPage.value = data.page;
         essayTotalPages.value = data.totalPages;
         essaysLoaded.value = true;
+        if (animate) {
+          await animateEssayBatch(essayBatchStartIndex);
+        }
       } catch (err) {
         if (requestId !== essayRequestId) {
           return;
@@ -203,16 +292,10 @@ export default defineComponent({
     };
 
     onMounted(async () => {
-      await Promise.all([blogStore.loadAuthors(), blogStore.loadEssayTags()]);
+      await blogStore.loadEssayTags({ kind: selectedKind.value });
       await loadEssaysPage({ reset: true });
     });
 
-    const authorOptions = computed(() => [
-      { value: "", label: "Tất cả" },
-      ...blogStore
-        .getAuthors()
-        .map((author) => ({ value: author.authorSlug, label: author.author })),
-    ]);
     const tagOptions = computed(() => [
       { value: "", label: "Tất cả" },
       ...blogStore.state.essayTags.map((tag) => ({ value: tag.slug, label: tag.label })),
@@ -232,15 +315,49 @@ export default defineComponent({
       }
     };
 
+    const formatKind = (value = "") => (value === "research" ? "Nghiên cứu" : "Bình luận");
+
     const excerpt = (value = "") => {
-      const normalized = value.replace(/\s+/g, " ").trim();
-      if (normalized.length <= 180) return normalized;
-      return `${normalized.slice(0, 177)}...`;
+      return excerptEssayContent(value, 180);
     };
 
-    watch([selectedAuthorSlug, selectedTagSlug], () => {
-      loadEssaysPage({ reset: true });
+    watch(selectedTagSlug, () => {
+      animateEssayCollectionSwap(async () => {
+        await animateEssayReset();
+        await loadEssaysPage({ reset: true, animate: false });
+      });
     });
+
+    watch(selectedKind, async () => {
+      const normalizedKind = normalizeKind(selectedKind.value);
+      if (route.query.kind !== normalizedKind) {
+        router.replace({
+          query: {
+            ...route.query,
+            kind: normalizedKind,
+          },
+        });
+      }
+      await blogStore.loadEssayTags({ kind: selectedKind.value });
+      if (selectedTagSlug.value) {
+        selectedTagSlug.value = "";
+        return;
+      }
+      animateEssayCollectionSwap(async () => {
+        await animateEssayReset();
+        await loadEssaysPage({ reset: true, animate: false });
+      });
+    });
+
+    watch(
+      () => route.query.kind,
+      (value) => {
+        const normalizedKind = normalizeKind(value);
+        if (selectedKind.value !== normalizedKind) {
+          selectedKind.value = normalizedKind;
+        }
+      }
+    );
 
     watch(essayQuery, () => {
       if (essaySearchTimer) {
@@ -248,12 +365,16 @@ export default defineComponent({
       }
 
       essaySearchTimer = window.setTimeout(() => {
-        loadEssaysPage({ reset: true });
+        animateEssayCollectionSwap(async () => {
+          await animateEssayReset();
+          await loadEssaysPage({ reset: true, animate: false });
+        });
       }, 220);
     });
 
     onBeforeUnmount(() => {
       detachEssayLoadMoreObserver();
+      killMotion(getEssayNodes());
       if (essaySearchTimer) {
         clearTimeout(essaySearchTimer);
       }
@@ -263,18 +384,20 @@ export default defineComponent({
       essays,
       loading,
       error,
+      essayCards,
       essaysLoaded,
       totalEssays,
       hasFilters,
       hasMoreEssays,
+      essayContentRegion,
       essayLoadMoreTrigger,
       essayQuery,
-      selectedAuthorSlug,
+      selectedKind,
       selectedTagSlug,
-      authorOptions,
       tagOptions,
       excerpt,
       formatDate,
+      formatKind,
       resolveImage: resolveMediaUrl,
     };
   },
@@ -295,6 +418,61 @@ export default defineComponent({
   max-width: 52rem;
 }
 
+.essay-index__kind-switch {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 1rem;
+  width: fit-content;
+}
+
+.essay-index__kind-tab {
+  display: block;
+  width: auto;
+  padding: 0.15rem 0 0.65rem;
+  border: 0;
+  background: transparent;
+  color: var(--color-description);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.05rem;
+  text-align: left;
+  transition: color 220ms ease;
+}
+
+.essay-index__kind-tab-label {
+  position: relative;
+  display: inline-block;
+  padding-bottom: 0.12rem;
+}
+
+.essay-index__kind-tab-label::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 100%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    rgb(var(--color-text-rgb) / 0) 0%,
+    currentColor 18%,
+    currentColor 82%,
+    rgb(var(--color-text-rgb) / 0) 100%
+  );
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.essay-index__kind-tab--active {
+  color: var(--color-text);
+}
+
+.essay-index__kind-tab--active .essay-index__kind-tab-label::after {
+  transform: scaleX(1);
+}
+
 .essay-index__title {
   margin: 0;
   max-width: 12ch;
@@ -304,7 +482,7 @@ export default defineComponent({
 .essay-index__status {
   margin: 0;
   max-width: 44rem;
-  color: rgba(177, 165, 159, 0.84);
+  color: var(--color-muted);
 }
 
 .essay-index__controls {
@@ -321,11 +499,11 @@ export default defineComponent({
   gap: 0.5rem;
   min-width: 0;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(177, 165, 159, 0.24);
+  border-bottom: 1px solid rgb(var(--color-text-rgb) / 0.24);
 }
 
 .essay-index__search-icon {
-  color: rgba(177, 165, 159, 0.6);
+  color: var(--color-muted-faint);
   font-size: 0.95rem;
   line-height: 1;
   flex: 0 0 auto;
@@ -336,7 +514,7 @@ export default defineComponent({
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #b1a59f;
+  color: var(--color-text);
   font: inherit;
   font-size: 0.96rem;
   line-height: 1.2;
@@ -345,7 +523,7 @@ export default defineComponent({
 }
 
 .essay-index__search-input::placeholder {
-  color: rgba(177, 165, 159, 0.45);
+  color: var(--color-muted-ghost);
 }
 
 .essay-index__filter {
@@ -354,11 +532,11 @@ export default defineComponent({
   gap: 0.55rem;
   min-width: 0;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(177, 165, 159, 0.24);
+  border-bottom: 1px solid rgb(var(--color-text-rgb) / 0.24);
 }
 
 .essay-index__filter-label {
-  color: rgba(177, 165, 159, 0.52);
+  color: rgb(var(--color-text-rgb) / 0.52);
   font-size: 0.74rem;
   line-height: 1;
   letter-spacing: 0.12em;
@@ -410,7 +588,7 @@ export default defineComponent({
   right: 0;
   bottom: -1.2rem;
   height: 1px;
-  background: linear-gradient(90deg, rgba(177, 165, 159, 0.2), rgba(177, 165, 159, 0));
+  background: var(--divider-gradient-soft);
 }
 
 .essay-card__inner {
@@ -448,7 +626,7 @@ export default defineComponent({
   flex-wrap: wrap;
   gap: 0.5rem;
   margin: 0;
-  color: rgba(177, 165, 159, 0.58);
+  color: var(--color-muted-faint);
   font-size: 0.8rem;
   line-height: 1.3;
   letter-spacing: 0.12em;
@@ -467,7 +645,7 @@ export default defineComponent({
   margin: 0;
   font-size: 1.04rem;
   line-height: 1.65;
-  color: rgba(177, 165, 159, 0.88);
+  color: rgb(var(--color-text-rgb) / 0.88);
   max-width: 38rem;
 }
 
@@ -480,7 +658,7 @@ export default defineComponent({
 
 .essay-card__tag {
   margin: 0;
-  color: rgba(177, 165, 159, 0.62);
+  color: rgb(var(--color-text-rgb) / 0.62);
   font-size: 0.84rem;
   line-height: 1.35;
   letter-spacing: 0.06em;

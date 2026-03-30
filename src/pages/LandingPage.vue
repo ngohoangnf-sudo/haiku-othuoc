@@ -7,7 +7,9 @@
           :style="'background-image: url(' + images._1 + ')'"
         ></div>
       </div>
-      <h2 class="content__item-title content__item-title--layer">Đọc</h2>
+      <h2 class="content__item-title content__item-title--layer">
+        <router-link to="/read/jp">Đọc</router-link>
+      </h2>
       <div class="content__item-description">
         <router-link to="/read/jp" class="link"><p> haiku nhật</p></router-link>
         <router-link to="/read/vi" class="link"><p>haiku việt</p></router-link>
@@ -45,10 +47,12 @@
           :style="'background-image: url(' + images._3 + ')'"
         ></div>
       </div>
-      <h2 class="content__item-title content__item-title--layer">Nghĩ</h2>
+      <h2 class="content__item-title content__item-title--layer">
+        <router-link to="/essays">Nghĩ</router-link>
+      </h2>
       <div class="content__item-description">
-        <p>nghiên cứu</p>
-        <p>bình luận</p>
+        <router-link :to="{ path: '/essays', query: { kind: 'research' } }" class="link"><p>nghiên cứu</p></router-link>
+        <router-link :to="{ path: '/essays', query: { kind: 'commentary' } }" class="link"><p>bình luận</p></router-link>
       </div>
     </div>
     <div class="content__item" style="--aspect-ratio: 700/300">
@@ -58,7 +62,9 @@
           :style="'background-image: url(' + images._4 + ')'"
         ></div>
       </div>
-      <h2 class="content__item-title content__item-title--layer">Haiku#</h2>
+      <h2 class="content__item-title content__item-title--layer">
+        <router-link to="/haiku-number">Haiku#</router-link>
+      </h2>
     </div>
     <div class="content__item" style="--aspect-ratio: 500/545">
       <div class="content__item-imgwrap">
@@ -67,11 +73,13 @@
           :style="'background-image: url(' + images._5 + ')'"
         ></div>
       </div>
-      <h2 class="content__item-title content__item-title--layer">Thư Viện</h2>
+      <h2 class="content__item-title content__item-title--layer">
+        <router-link to="/library">Thư Viện</router-link>
+      </h2>
       <div class="content__item-description">
-        <p>giới thiệu sách</p>
-        <p>ebook</p>
-        <p>mượn sách giấy</p>
+        <router-link to="/library" class="link"><p>giới thiệu sách</p></router-link>
+        <router-link to="/library" class="link"><p>ebook</p></router-link>
+        <router-link to="/library" class="link"><p>mượn sách giấy</p></router-link>
       </div>
     </div>
   </div>

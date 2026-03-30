@@ -136,10 +136,10 @@ export default defineComponent({
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--surface-input-border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-  color: #b1a59f;
+  background: var(--surface-input-bg);
+  color: var(--color-text);
   padding: 0.75rem 1rem;
   text-align: left;
   font: inherit;
@@ -154,10 +154,10 @@ export default defineComponent({
 .elegant-select__trigger:focus-visible,
 .elegant-select--open .elegant-select__trigger {
   outline: none;
-  border-color: rgba(177, 165, 159, 0.28);
-  background: rgba(255, 255, 255, 0.055);
+  border-color: var(--focus-border);
+  background: var(--surface-input-focus-bg);
   box-shadow:
-    0 0 0 3px rgba(177, 165, 159, 0.08),
+    0 0 0 3px var(--focus-ring),
     0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
@@ -169,8 +169,8 @@ export default defineComponent({
   flex: 0 0 auto;
   width: 0.52rem;
   height: 0.52rem;
-  border-right: 1px solid rgba(177, 165, 159, 0.72);
-  border-bottom: 1px solid rgba(177, 165, 159, 0.72);
+  border-right: 1px solid var(--color-muted-soft);
+  border-bottom: 1px solid var(--color-muted-soft);
   transform: rotate(45deg) translateY(-0.08rem);
   transition: transform 180ms ease;
 }
@@ -192,18 +192,18 @@ export default defineComponent({
   padding: 0.35rem;
   list-style: none;
   border-radius: 14px;
-  border: 1px solid rgba(177, 165, 159, 0.1);
+  border: 1px solid var(--border-soft);
   background: var(--color-bg, #2f2c2b);
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.22),
-    0 0 0 1px rgba(255, 255, 255, 0.015);
+    0 0 0 1px var(--surface-subtle-bg);
 }
 
 .elegant-select__option {
   width: 100%;
   border: 0;
   background: transparent;
-  color: rgba(177, 165, 159, 0.84);
+  color: var(--color-muted);
   border-radius: 10px;
   padding: 0.72rem 0.8rem;
   text-align: left;
@@ -217,8 +217,8 @@ export default defineComponent({
 
 .elegant-select__option:hover,
 .elegant-select__option--active {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e6e0db;
+  background: var(--surface-input-focus-bg);
+  color: var(--color-text);
 }
 
 .elegant-select__menu-enter-active,

@@ -41,7 +41,11 @@
               />
             </label>
           </div>
-          <div v-if="filteredOtherAuthors.length" class="author-page__authors-list">
+          <div ref="authorsPanel">
+            <div
+              v-if="filteredOtherAuthors.length"
+              class="author-page__authors-list"
+            >
               <router-link
                 v-for="item in pagedOtherAuthors"
                 :key="item.authorSlug"
@@ -50,8 +54,15 @@
               >
                 {{ item.author }}
               </router-link>
+            </div>
+            <p
+              v-else
+              :key="`authors-empty-${authorQuery}`"
+              class="author-page__authors-empty page-reading-copy"
+            >
+              Không tìm thấy tác giả phù hợp.
+            </p>
           </div>
-          <p v-else class="author-page__authors-empty page-reading-copy">Không tìm thấy tác giả phù hợp.</p>
         </div>
         <div class="author-page__authors-bottom">
           <div v-if="otherAuthorsTotalPages > 1" class="author-page__authors-pagination">
@@ -81,12 +92,11 @@
     </section>
 
     <section v-if="poems.length" class="author-page__poems-wrap">
-      <transition-group tag="div" name="author-page__poem" class="author-page__poems">
+      <div ref="poemsList" class="author-page__poems">
         <article
-          v-for="(poem, index) in poems"
+          v-for="poem in poems"
           :key="poem.id"
           class="author-page__poem"
-          :style="{ '--poem-delay': poemRowDelay(index) }"
         >
           <p v-if="poem.title" class="author-page__poem-title">{{ poem.title }}</p>
           <div class="author-page__poem-body">
@@ -105,7 +115,7 @@
             </router-link>
           </div>
         </article>
-      </transition-group>
+      </div>
       <div
         v-if="hasMorePoems"
         ref="poemLoadMoreTrigger"
@@ -124,6 +134,7 @@
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
+import { MOTION_PRESETS, animateGridEnterByRows, animatePanelIn, animatePanelOut, killMotion } from "src/utils/motion";
 
 export default defineComponent({
   name: "AuthorPage",
@@ -133,7 +144,9 @@ export default defineComponent({
     const otherAuthorsPage = ref(1);
     const authorSearchExpanded = ref(false);
     const authorSearchInput = ref(null);
+    const authorsPanel = ref(null);
     const poemLoadMoreTrigger = ref(null);
+    const poemsList = ref(null);
     const pagedPoems = ref([]);
     const totalPoems = ref(0);
     const poemPage = ref(0);
@@ -142,7 +155,7 @@ export default defineComponent({
     const poemsLoaded = ref(false);
     const pageError = ref("");
     const authorPoemSeed = ref("");
-    const poemRevealStartIndex = ref(0);
+    const authorsPanelTransitionId = ref(0);
     const viewportWidth = ref(typeof window === "undefined" ? 1440 : window.innerWidth);
     const OTHER_AUTHORS_PAGE_SIZE = 12;
     const POEM_BATCH_SIZE = 9;
@@ -203,8 +216,51 @@ export default defineComponent({
     const formatPageNumber = (value) => String(Math.max(1, Number(value) || 1)).padStart(2, "0");
     const createAuthorPoemSeed = () =>
       `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const changeOtherAuthorsPage = (page) => {
-      otherAuthorsPage.value = Math.min(Math.max(1, page), otherAuthorsTotalPages.value);
+    const getPoemNodes = () =>
+      poemsList.value ? Array.from(poemsList.value.querySelectorAll(".author-page__poem")) : [];
+
+    const animatePoemBatch = async (startIndex = 0) => {
+      await nextTick();
+      const nodes = getPoemNodes().slice(startIndex);
+      await animateGridEnterByRows(nodes, {
+        columns: currentPoemColumns.value,
+        ...MOTION_PRESETS.list.enter,
+        rowStagger: 0.17,
+        fromY: 14,
+      });
+    };
+
+    const transitionAuthorsPanel = async (mutate) => {
+      const transitionId = authorsPanelTransitionId.value + 1;
+      authorsPanelTransitionId.value = transitionId;
+
+      if (authorsPanel.value) {
+        await animatePanelOut(authorsPanel.value, {
+          ...MOTION_PRESETS.editorial.panelOut,
+        });
+      }
+
+      mutate();
+      await nextTick();
+
+      if (authorsPanelTransitionId.value !== transitionId) {
+        return;
+      }
+
+      await animatePanelIn(authorsPanel.value, {
+        ...MOTION_PRESETS.editorial.panelIn,
+      });
+    };
+
+    const changeOtherAuthorsPage = async (page) => {
+      const nextPage = Math.min(Math.max(1, page), otherAuthorsTotalPages.value);
+      if (nextPage === otherAuthorsPage.value) {
+        return;
+      }
+
+      await transitionAuthorsPanel(() => {
+        otherAuthorsPage.value = nextPage;
+      });
     };
     const expandAuthorSearch = async () => {
       authorSearchExpanded.value = true;
@@ -221,14 +277,6 @@ export default defineComponent({
       if (viewportWidth.value <= 1152) return 2;
       return 3;
     });
-    const poemRowDelay = (index) => {
-      if (index < poemRevealStartIndex.value) {
-        return "0ms";
-      }
-      const relativeIndex = index - poemRevealStartIndex.value;
-      const row = Math.floor(relativeIndex / currentPoemColumns.value);
-      return `${row * 170}ms`;
-    };
     const loadPoemsPage = async ({ reset = false } = {}) => {
       if (poemsLoading.value || !slug.value) {
         return;
@@ -241,12 +289,7 @@ export default defineComponent({
 
       poemsLoading.value = true;
       pageError.value = "";
-
-      if (reset) {
-        poemRevealStartIndex.value = 0;
-      } else {
-        poemRevealStartIndex.value = pagedPoems.value.length;
-      }
+      const previousCount = reset ? 0 : pagedPoems.value.length;
 
       try {
         const data = await blogStore.fetchPagedPosts({
@@ -263,6 +306,7 @@ export default defineComponent({
         poemPage.value = data.page;
         poemTotalPages.value = data.totalPages;
         poemsLoaded.value = true;
+        await animatePoemBatch(previousCount);
       } catch (err) {
         console.error("Không tải được bài của tác giả", err);
         pageError.value = "Không tải được danh sách bài viết của tác giả.";
@@ -309,7 +353,9 @@ export default defineComponent({
     const error = computed(() => pageError.value);
 
     watch(authorQuery, () => {
-      otherAuthorsPage.value = 1;
+      transitionAuthorsPanel(() => {
+        otherAuthorsPage.value = 1;
+      });
     });
 
     watch(
@@ -324,7 +370,6 @@ export default defineComponent({
         poemPage.value = 0;
         poemTotalPages.value = 1;
         poemsLoaded.value = false;
-        poemRevealStartIndex.value = 0;
         await loadPoemsPage({ reset: true });
       },
       { immediate: true }
@@ -341,18 +386,21 @@ export default defineComponent({
       if (typeof window !== "undefined") {
         window.removeEventListener("resize", syncViewportWidth);
       }
+      killMotion(authorsPanel.value);
+      killMotion(getPoemNodes());
     });
 
     return {
       poems,
       hasMorePoems,
-      poemRowDelay,
       authorName,
       otherAuthors,
       authorQuery,
       authorSearchExpanded,
       authorSearchInput,
+      authorsPanel,
       poemLoadMoreTrigger,
+      poemsList,
       filteredOtherAuthors,
       pagedOtherAuthors,
       otherAuthorsPage,
@@ -403,7 +451,7 @@ export default defineComponent({
 
 .author-page__eyebrow {
   margin: 0;
-  color: rgba(177, 165, 159, 0.68);
+  color: rgb(var(--color-text-rgb) / 0.68);
   font-size: 0.86rem;
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -431,7 +479,7 @@ export default defineComponent({
   display: block;
   width: min(100%, 7.5rem);
   height: 1px;
-  background: linear-gradient(90deg, rgba(177, 165, 159, 0.34), rgba(177, 165, 159, 0));
+  background: var(--rule-gradient);
 }
 
 .author-page__lead,
@@ -487,7 +535,7 @@ export default defineComponent({
   bottom: 0;
   width: 0;
   height: 1px;
-  background: linear-gradient(90deg, rgba(177, 165, 159, 0.42), rgba(177, 165, 159, 0.12));
+  background: var(--divider-gradient-strong);
   transition: width 180ms ease, background 180ms ease;
 }
 
@@ -496,7 +544,7 @@ export default defineComponent({
   top: 50%;
   left: 0.1rem;
   transform: translateY(-50%);
-  color: rgba(177, 165, 159, 0.58);
+  color: var(--color-muted-faint);
   font-size: 0.95rem;
   line-height: 1;
   pointer-events: none;
@@ -510,7 +558,7 @@ export default defineComponent({
   border: none;
   border-radius: 0;
   background: transparent;
-  color: #b1a59f;
+  color: var(--color-text);
   font: inherit;
   font-size: 0.9rem;
   line-height: 1.3;
@@ -528,11 +576,11 @@ export default defineComponent({
 }
 
 .author-page__authors-search--expanded .author-page__authors-search-trigger {
-  color: rgba(177, 165, 159, 0.82);
+  color: var(--color-muted);
 }
 
 .author-page__authors-input::placeholder {
-  color: rgba(177, 165, 159, 0.58);
+  color: var(--color-muted-faint);
   opacity: 0;
   transition: opacity 120ms ease;
 }
@@ -562,7 +610,7 @@ export default defineComponent({
   align-items: center;
   gap: 0.45rem;
   padding: 0;
-  color: rgba(177, 165, 159, 0.82);
+  color: var(--color-muted);
   font-family: var(--font-title);
   font-size: 1rem;
   line-height: 1.15;
@@ -579,7 +627,7 @@ export default defineComponent({
   display: block;
   width: 0.8rem;
   height: 1px;
-  background: linear-gradient(90deg, rgba(177, 165, 159, 0.38), rgba(177, 165, 159, 0.12));
+  background: var(--divider-gradient-strong);
   transform-origin: left center;
   transition: background 180ms ease;
 }
@@ -591,7 +639,7 @@ export default defineComponent({
 }
 
 .author-page__author-link:hover::before {
-  background: linear-gradient(90deg, rgba(177, 165, 159, 0.62), rgba(177, 165, 159, 0.16));
+  background: var(--divider-gradient-strong);
 }
 
 .author-page__authors-empty {
@@ -604,7 +652,7 @@ export default defineComponent({
   padding: 0;
   border: none;
   background: transparent;
-  color: #b1a59f;
+  color: var(--color-text);
   font: inherit;
   font-size: 0.92rem;
   line-height: 1;
@@ -636,7 +684,7 @@ export default defineComponent({
 
 .author-page__authors-page-label {
   margin: 0;
-  color: rgba(177, 165, 159, 0.74);
+  color: var(--color-muted-soft);
   font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -656,23 +704,6 @@ export default defineComponent({
 .author-page__poems-sentinel {
   width: 100%;
   height: 1px;
-}
-
-.author-page__poem-enter-active {
-  transition:
-    opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  transition-delay: var(--poem-delay, 0ms);
-}
-
-.author-page__poem-enter-from {
-  opacity: 0;
-  transform: translateY(0.9rem);
-}
-
-.author-page__poem-enter-to {
-  opacity: 1;
-  transform: translateY(0);
 }
 
 .author-page__poem {
@@ -717,19 +748,19 @@ export default defineComponent({
   gap: 1rem;
   flex-wrap: wrap;
   padding-top: 0.85rem;
-  border-top: 1px solid rgba(255, 255, 255, 0.045);
+  border-top: 1px solid rgb(var(--color-text-rgb) / 0.12);
 }
 
 .author-page__poem-date {
   margin: 0;
-  color: rgba(177, 165, 159, 0.64);
+  color: rgb(var(--color-text-rgb) / 0.64);
   font-size: 0.84rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 .author-page__poem-link {
-  color: #b1a59f;
+  color: var(--color-text);
   font-size: 0.88rem;
   line-height: 1.3;
   letter-spacing: 0.06em;

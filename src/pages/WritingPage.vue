@@ -12,7 +12,7 @@
       <div class="write-page__intro">
         <h1 class="write-page__heading page-reading-h2 page-heading-with-rule">Viết & đăng bài</h1>
         <p class="write-page__lead page-reading-copy">
-          Chọn đăng haiku hoặc bài luận/ghi chép.
+          Chọn đăng haiku hoặc nghiên cứu và bình luận.
         </p>
         <p v-if="!canEdit" class="write-page__status page-reading-copy">
           Bạn đang ở quyền Viewer. Hãy <router-link to="/login">đăng nhập</router-link> bằng tài khoản Editor hoặc Admin để đăng và chỉnh sửa nội dung.
@@ -37,7 +37,7 @@
             type="button"
             @click="activeComposer = 'essay'"
           >
-            <span class="write-page__mode-tab-label">Bài luận / ghi chép</span>
+            <span class="write-page__mode-tab-label">Nghiên cứu và bình luận</span>
           </button>
         </div>
 
@@ -158,48 +158,58 @@ Một chút quà Edo"
         </form>
 
         <form v-else class="write-form" @submit.prevent="submitEssay">
-          <label class="form-field">
-            <span class="form-field__label">Tiêu đề</span>
-            <input v-model="essayForm.title" class="input" placeholder="Tên bài luận / ghi chép" />
-          </label>
-          <label class="form-field">
-            <span class="form-field__label">Tác giả</span>
-            <div class="form-field__autocomplete">
-              <input
-                v-model="essayForm.author"
-                class="input"
-                placeholder="Tên tác giả"
-                autocomplete="off"
-                @focus="openAuthorSuggestions('essay')"
-                @blur="scheduleAuthorSuggestionsClose('essay')"
-              />
-              <div
-                v-if="showEssayAuthorSuggestions"
-                class="form-field__autocomplete-menu"
-              >
-                <button
-                  v-for="item in essayAuthorSuggestions"
-                  :key="`essay-author-${item.authorSlug}`"
-                  type="button"
-                  class="form-field__autocomplete-option"
-                  @mousedown.prevent="selectSuggestedAuthor('essay', item.author)"
+          <div class="write-form__essay-head">
+            <label class="form-field">
+              <span class="form-field__label">Tiêu đề</span>
+              <input v-model="essayForm.title" class="input" placeholder="Tên bài trong mục Nghĩ" />
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Tác giả</span>
+              <div class="form-field__autocomplete">
+                <input
+                  v-model="essayForm.author"
+                  class="input"
+                  placeholder="Tên tác giả"
+                  autocomplete="off"
+                  @focus="openAuthorSuggestions('essay')"
+                  @blur="scheduleAuthorSuggestionsClose('essay')"
+                />
+                <div
+                  v-if="showEssayAuthorSuggestions"
+                  class="form-field__autocomplete-menu"
                 >
-                  {{ item.author }}
-                </button>
+                  <button
+                    v-for="item in essayAuthorSuggestions"
+                    :key="`essay-author-${item.authorSlug}`"
+                    type="button"
+                    class="form-field__autocomplete-option"
+                    @mousedown.prevent="selectSuggestedAuthor('essay', item.author)"
+                  >
+                    {{ item.author }}
+                  </button>
+                </div>
               </div>
-            </div>
-          </label>
-          <label class="form-field">
-            <span class="form-field__label">Trạng thái</span>
-            <ElegantSelect
-              v-model="essayForm.status"
-              :options="[
-                { value: 'draft', label: 'Draft' },
-                { value: 'published', label: 'Published' },
-              ]"
-              aria-label="Trạng thái bài luận"
-            />
-          </label>
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Mục</span>
+              <ElegantSelect
+                v-model="essayForm.kind"
+                :options="essayKindOptions"
+                aria-label="Phân loại bài trong mục Nghĩ"
+              />
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Trạng thái</span>
+              <ElegantSelect
+                v-model="essayForm.status"
+                :options="[
+                  { value: 'draft', label: 'Draft' },
+                  { value: 'published', label: 'Published' },
+                ]"
+                aria-label="Trạng thái bài luận"
+              />
+            </label>
+          </div>
           <label class="form-field form-field--wide">
             <span class="form-field__label">Tóm tắt</span>
             <input v-model="essayForm.summary" class="input" placeholder="Một đoạn ngắn dẫn vào bài" />
@@ -255,28 +265,16 @@ Một chút quà Edo"
           </label>
           <label class="form-field form-field--wide">
             <span class="form-field__label">Nội dung bài</span>
-            <textarea
+            <RichEssayEditor
               v-model="essayForm.body"
-              class="input write-form__textarea--essay"
-              rows="10"
-              placeholder="Viết bài luận hoặc ghi chép ở đây.
-
-Mỗi đoạn cách nhau bằng một dòng trống."
-            ></textarea>
+              placeholder="Viết nghiên cứu hoặc bình luận ở đây."
+              @image-uploaded="handleEssayBodyImageUploaded"
+              @error="handleEssayEditorError"
+            />
           </label>
-          <div class="write-form__markdown-preview form-field--wide">
-            <div class="write-form__markdown-head">
-              <span class="form-field__label">Preview markdown</span>
-              <span class="form-field__hint">Hỗ trợ nhẹ: `#`, `##`, `**bold**`, `*italic*`, ``code`` và link markdown.</span>
-            </div>
-            <div
-              class="write-form__markdown-body page-reading-copy"
-              v-html="essayMarkdownPreview"
-            ></div>
-          </div>
           <div class="write-form__actions">
             <button class="submit-btn" type="submit">
-              {{ editingEssaySlug ? "Lưu chỉnh sửa" : "Đăng bài luận" }}
+              {{ editingEssaySlug ? "Lưu chỉnh sửa" : "Đăng bài" }}
             </button>
             <button
               v-if="editingEssaySlug"
@@ -330,42 +328,47 @@ Mỗi đoạn cách nhau bằng một dòng trống."
         <p class="write-page__subcopy page-reading-copy">{{ previewPostsTotal }} bài</p>
       </div>
 
-      <transition-group
+      <div
         v-if="visiblePosts.length"
-        name="write-page__preview-card"
-        tag="div"
+        ref="poemPreviewList"
         :class="['write-page__preview-list', 'write-page__preview-list--poems']"
-        :style="{ '--preview-exit-duration': `${poemExitDurationMs}ms` }"
       >
           <article
-            v-for="(poem, index) in visiblePosts"
+            v-for="poem in visiblePosts"
             :key="`poem-${previewPostsPage}-${poem.id}`"
             class="write-page__preview"
             :class="{ 'write-page__preview--active': editingPostId === poem.id && activeComposer === 'poem' }"
-            :style="{ '--preview-delay': previewRowDelay(index, 'poem') }"
           >
             <p v-if="poem.title" class="write-page__preview-title">{{ poem.title }}</p>
             <div class="write-page__preview-body">
               <p v-for="(line, i) in poem.lines" :key="i" class="write-page__preview-line page-reading-copy">{{ line }}</p>
             </div>
-            <div class="write-page__preview-meta">
-              <router-link :to="'/authors/' + poem.authorSlug" class="write-page__preview-author">
-                {{ poem.author }}
-              </router-link>
-              <router-link :to="'/post/' + poem.id" class="write-page__preview-link">
-                Xem bài · {{ formatDate(poem.publishedAt) }}
-              </router-link>
-            </div>
-            <div v-if="canEdit" class="write-page__preview-actions">
-              <button class="write-page__preview-action" type="button" @click="startEditingPost(poem)">
-                {{ editingPostId === poem.id && activeComposer === 'poem' ? "Đang sửa" : "Sửa" }}
-              </button>
-              <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removePost(poem)">
-                Xóa
-              </button>
+            <div class="write-page__preview-footer">
+              <div class="write-page__preview-meta">
+                <router-link :to="'/authors/' + poem.authorSlug" class="write-page__preview-author">
+                  {{ poem.author }}
+                </router-link>
+                <p
+                  v-if="canEdit && poem.postedBy"
+                  class="write-page__preview-poster page-reading-copy"
+                >
+                  Đăng bởi {{ poem.postedBy.displayName || poem.postedBy.username }}
+                </p>
+                <router-link :to="'/post/' + poem.id" class="write-page__preview-link">
+                  Xem bài · {{ formatDate(poem.publishedAt) }}
+                </router-link>
+              </div>
+              <div v-if="canEdit" class="write-page__preview-actions">
+                <button class="write-page__preview-action" type="button" @click="startEditingPost(poem)">
+                  {{ editingPostId === poem.id && activeComposer === 'poem' ? "Đang sửa" : "Sửa" }}
+                </button>
+                <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removePost(poem)">
+                  Xóa
+                </button>
+              </div>
             </div>
           </article>
-      </transition-group>
+      </div>
       <p
         v-else-if="!previewPostsLoading"
         class="write-page__preview-empty page-reading-copy"
@@ -404,7 +407,7 @@ Mỗi đoạn cách nhau bằng một dòng trống."
     >
       <div class="write-page__previews-head">
         <div class="write-page__previews-head-top">
-          <h2 class="write-page__subheading page-reading-h3">Bài luận & ghi chép</h2>
+          <h2 class="write-page__subheading page-reading-h3">Nghiên cứu và bình luận</h2>
           <div class="write-page__preview-tools">
             <label class="write-page__preview-search">
               <span class="write-page__preview-search-icon" aria-hidden="true">⌕</span>
@@ -413,10 +416,19 @@ Mỗi đoạn cách nhau bằng một dòng trống."
                 type="search"
                 class="write-page__preview-search-input"
                 placeholder="Tìm kiếm"
-                aria-label="Tìm bài luận và ghi chép"
+                aria-label="Tìm nội dung trong mục Nghĩ"
               />
             </label>
             <label class="write-page__preview-filter">
+              <span class="write-page__preview-filter-label">Mục</span>
+              <ElegantSelect
+                v-model="essayPreviewKind"
+                class="write-page__preview-filter-select"
+                :options="essayPreviewKindOptions"
+                aria-label="Lọc nội dung Nghĩ theo mục"
+              />
+            </label>
+            <label v-if="canEdit" class="write-page__preview-filter">
               <span class="write-page__preview-filter-label">Trạng thái</span>
               <ElegantSelect
                 v-model="essayPreviewStatus"
@@ -430,54 +442,61 @@ Mỗi đoạn cách nhau bằng một dòng trống."
         <p class="write-page__subcopy page-reading-copy">{{ previewEssaysTotal }} bài</p>
       </div>
 
-      <transition-group
+      <div
         v-if="visibleEssays.length"
-        name="write-page__preview-card"
-        tag="div"
+        ref="essayPreviewList"
         :class="['write-page__preview-list', 'write-page__preview-list--essays']"
-        :style="{ '--preview-exit-duration': `${essayExitDurationMs}ms` }"
       >
           <article
-            v-for="(essay, index) in visibleEssays"
+            v-for="essay in visibleEssays"
             :key="`essay-${previewEssaysPage}-${essay.id}`"
             class="write-page__preview write-page__preview--essay"
             :class="{ 'write-page__preview--active': editingEssaySlug === essay.slug && activeComposer === 'essay' }"
-            :style="{ '--preview-delay': previewRowDelay(index, 'essay') }"
           >
             <p class="write-page__preview-title">{{ essay.title }}</p>
-            <p class="write-page__essay-status page-reading-copy">{{ essay.status === "draft" ? "Draft" : "Published" }}</p>
+            <p class="write-page__essay-meta-line page-reading-copy">
+              {{ formatEssayKind(essay.kind) }} · {{ essay.status === "draft" ? "Draft" : "Published" }}
+            </p>
             <p class="write-page__essay-summary page-reading-copy">{{ essay.summary || excerptEssay(essay.body) }}</p>
             <p v-if="essay.tags?.length" class="write-page__essay-tags page-reading-copy">
               {{ essay.tags.map((tag) => tag.label).join(" · ") }}
             </p>
-            <div class="write-page__preview-meta">
-              <router-link
-                v-if="essay.authorSlug"
-                :to="'/authors/' + essay.authorSlug"
-                class="write-page__preview-author"
-              >
-                {{ essay.author }}
-              </router-link>
-              <span v-else class="write-page__preview-author">{{ essay.author || "Ẩn danh" }}</span>
-              <router-link :to="'/essays/' + essay.slug" class="write-page__preview-link">
-                Xem bài · {{ formatDate(essay.publishedAt) }}
-              </router-link>
-            </div>
-            <div v-if="canEdit" class="write-page__preview-actions">
-              <button class="write-page__preview-action" type="button" @click="startEditingEssay(essay)">
-                {{ editingEssaySlug === essay.slug && activeComposer === 'essay' ? "Đang sửa" : "Sửa" }}
-              </button>
-              <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removeEssay(essay)">
-                Xóa
-              </button>
+            <div class="write-page__preview-footer">
+              <div class="write-page__preview-meta">
+                <router-link
+                  v-if="essay.authorSlug"
+                  :to="'/authors/' + essay.authorSlug"
+                  class="write-page__preview-author"
+                >
+                  {{ essay.author }}
+                </router-link>
+                <span v-else class="write-page__preview-author">{{ essay.author || "Ẩn danh" }}</span>
+                <p
+                  v-if="canEdit && essay.postedBy"
+                  class="write-page__preview-poster page-reading-copy"
+                >
+                  Đăng bởi {{ essay.postedBy.displayName || essay.postedBy.username }}
+                </p>
+                <router-link :to="'/essays/' + essay.slug" class="write-page__preview-link">
+                  Xem bài · {{ formatDate(essay.publishedAt) }}
+                </router-link>
+              </div>
+              <div v-if="canEdit" class="write-page__preview-actions">
+                <button class="write-page__preview-action" type="button" @click="startEditingEssay(essay)">
+                  {{ editingEssaySlug === essay.slug && activeComposer === 'essay' ? "Đang sửa" : "Sửa" }}
+                </button>
+                <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removeEssay(essay)">
+                  Xóa
+                </button>
+              </div>
             </div>
           </article>
-      </transition-group>
+      </div>
       <p
         v-else-if="!previewEssaysLoading"
         class="write-page__preview-empty page-reading-copy"
       >
-        Không tìm thấy bài luận hoặc ghi chép phù hợp.
+        Không tìm thấy nội dung phù hợp trong mục Nghĩ.
       </p>
       <div v-if="previewEssaysTotalPages > 1" class="write-page__pagination">
         <button
@@ -509,9 +528,12 @@ Mỗi đoạn cách nhau bằng một dòng trống."
 <script>
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import ElegantSelect from "components/ElegantSelect.vue";
+import RichEssayEditor from "components/RichEssayEditor.vue";
 import blogStore from "src/stores/blogStore";
 import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
+import { MOTION_PRESETS, animateGridEnterByRows, animateGridExit, killMotion } from "src/utils/motion";
+import { excerptEssayContent, sanitizeEssayHtml, stripEssayText } from "src/utils/essayContent";
 
 const CATEGORY_OPTIONS = [
   { value: "jp", label: "Haiku Nhật" },
@@ -526,14 +548,15 @@ const DRAFT_STORAGE_KEYS = {
 
 const POEM_PREVIEW_PAGE_SIZE = 12;
 const ESSAY_PREVIEW_PAGE_SIZE = 9;
-const PREVIEW_PAGE_TRANSITION_MS = 360;
-const PREVIEW_FAST_EXIT_MS = 220;
-const PREVIEW_ROW_STAGGER_MS = 360;
+const PREVIEW_PAGE_TRANSITION_MS = MOTION_PRESETS.list.exit.duration;
+const PREVIEW_FAST_EXIT_MS = MOTION_PRESETS.list.fastExit.duration;
+const PREVIEW_ROW_STAGGER_SEC = MOTION_PRESETS.list.enter.rowStagger;
 
 export default defineComponent({
   name: "WritingPage",
   components: {
     ElegantSelect,
+    RichEssayEditor,
   },
   setup() {
     const syncViewportWidth = () => {
@@ -558,6 +581,8 @@ export default defineComponent({
     const essayImageInput = ref(null);
     const poemPreviewSection = ref(null);
     const essayPreviewSection = ref(null);
+    const poemPreviewList = ref(null);
+    const essayPreviewList = ref(null);
     const editingPostId = ref("");
     const editingEssaySlug = ref("");
 
@@ -573,6 +598,7 @@ export default defineComponent({
     const essayForm = reactive({
       title: "",
       author: "",
+      kind: "commentary",
       status: "draft",
       summary: "",
       image: "",
@@ -601,12 +627,11 @@ export default defineComponent({
     const poemPreviewQuery = ref("");
     const essayPreviewQuery = ref("");
     const poemPreviewCategory = ref("");
+    const essayPreviewKind = ref("");
     const essayPreviewStatus = ref(authStore.canEdit() ? "all" : "published");
-    const poemCardsVisible = ref(true);
-    const essayCardsVisible = ref(true);
-    const poemExitDurationMs = ref(PREVIEW_PAGE_TRANSITION_MS);
-    const essayExitDurationMs = ref(PREVIEW_PAGE_TRANSITION_MS);
     const viewportWidth = ref(syncViewportWidth());
+    const poemPreviewTransitionId = ref(0);
+    const essayPreviewTransitionId = ref(0);
     let toastTimer = null;
     let poemPreviewSearchTimer = null;
     let essayPreviewSearchTimer = null;
@@ -614,8 +639,8 @@ export default defineComponent({
 
     const posts = computed(() => previewPosts.value);
     const essays = computed(() => previewEssays.value);
-    const visiblePosts = computed(() => (poemCardsVisible.value ? previewPosts.value : []));
-    const visibleEssays = computed(() => (essayCardsVisible.value ? previewEssays.value : []));
+    const visiblePosts = computed(() => previewPosts.value);
+    const visibleEssays = computed(() => previewEssays.value);
     const showPoemPreviews = computed(
       () => previewPostsTotal.value > 0 || Boolean(poemPreviewQuery.value) || Boolean(poemPreviewCategory.value)
     );
@@ -624,6 +649,7 @@ export default defineComponent({
       return (
         previewEssaysTotal.value > 0 ||
         Boolean(essayPreviewQuery.value) ||
+        Boolean(essayPreviewKind.value) ||
         essayPreviewStatus.value !== defaultStatus
       );
     });
@@ -647,6 +673,15 @@ export default defineComponent({
           ]
         : [{ value: "published", label: "Published" }]
     );
+    const essayPreviewKindOptions = [
+      { value: "", label: "Tất cả" },
+      { value: "research", label: "Nghiên cứu" },
+      { value: "commentary", label: "Bình luận" },
+    ];
+    const essayKindOptions = [
+      { value: "research", label: "Nghiên cứu" },
+      { value: "commentary", label: "Bình luận" },
+    ];
 
     const handleResize = () => {
       viewportWidth.value = syncViewportWidth();
@@ -663,12 +698,6 @@ export default defineComponent({
       if (viewportWidth.value <= 800) return 1;
       if (viewportWidth.value <= 1088) return 2;
       return 3;
-    };
-
-    const previewRowDelay = (index, type) => {
-      const columns = type === "essay" ? getEssayPreviewColumns() : getPoemPreviewColumns();
-      const rowIndex = Math.floor(index / Math.max(1, columns));
-      return `${Math.min(rowIndex, 3) * PREVIEW_ROW_STAGGER_MS}ms`;
     };
 
     const getExpectedItemCount = (page, total, pageSize, totalPages) => {
@@ -774,6 +803,9 @@ export default defineComponent({
           pageSize: String(ESSAY_PREVIEW_PAGE_SIZE),
           status: essayPreviewStatus.value,
         });
+        if (essayPreviewKind.value) {
+          query.set("kind", essayPreviewKind.value);
+        }
         if (essayPreviewQuery.value) {
           query.set("search", essayPreviewQuery.value);
         }
@@ -803,15 +835,7 @@ export default defineComponent({
         POEM_PREVIEW_PAGE_SIZE,
         previewPostsTotalPages.value
       );
-      poemExitDurationMs.value =
-        targetCount < previewPosts.value.length ? PREVIEW_FAST_EXIT_MS : PREVIEW_PAGE_TRANSITION_MS;
-      poemCardsVisible.value = false;
-      await wait(poemExitDurationMs.value);
-      await loadPostPreviews(targetPage);
-      await nextTick();
-      poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
-      await nextTick();
-      poemCardsVisible.value = true;
+      await transitionPostPreviews(targetPage, targetCount < previewPosts.value.length);
     }
 
     async function changeEssayPreviewPage(nextPage) {
@@ -823,20 +847,76 @@ export default defineComponent({
         ESSAY_PREVIEW_PAGE_SIZE,
         previewEssaysTotalPages.value
       );
-      essayExitDurationMs.value =
-        targetCount < previewEssays.value.length ? PREVIEW_FAST_EXIT_MS : PREVIEW_PAGE_TRANSITION_MS;
-      essayCardsVisible.value = false;
-      await wait(essayExitDurationMs.value);
+      await transitionEssayPreviews(targetPage, targetCount < previewEssays.value.length);
+    }
+
+    const getPreviewItems = (type) => {
+      const root = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      return root ? Array.from(root.querySelectorAll(".write-page__preview")) : [];
+    };
+
+    const animatePreviewEnter = async (type) => {
+      await nextTick();
+      const items = getPreviewItems(type);
+      const columns = type === "essay" ? getEssayPreviewColumns() : getPoemPreviewColumns();
+      await animateGridEnterByRows(items, {
+        columns,
+        ...MOTION_PRESETS.list.enter,
+        rowStagger: PREVIEW_ROW_STAGGER_SEC,
+      });
+    };
+
+    const transitionPostPreviews = async (targetPage = 1, isFastExit = false) => {
+      const transitionId = poemPreviewTransitionId.value + 1;
+      poemPreviewTransitionId.value = transitionId;
+
+      const currentItems = getPreviewItems("poem");
+      if (currentItems.length) {
+        await animateGridExit(currentItems, {
+          ...(isFastExit ? MOTION_PRESETS.list.fastExit : MOTION_PRESETS.list.exit),
+        });
+      }
+
+      if (poemPreviewTransitionId.value !== transitionId) {
+        return;
+      }
+
+      await loadPostPreviews(targetPage);
+      await nextTick();
+      poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+      if (poemPreviewTransitionId.value !== transitionId) {
+        return;
+      }
+
+      await animatePreviewEnter("poem");
+    };
+
+    const transitionEssayPreviews = async (targetPage = 1, isFastExit = false) => {
+      const transitionId = essayPreviewTransitionId.value + 1;
+      essayPreviewTransitionId.value = transitionId;
+
+      const currentItems = getPreviewItems("essay");
+      if (currentItems.length) {
+        await animateGridExit(currentItems, {
+          ...(isFastExit ? MOTION_PRESETS.list.fastExit : MOTION_PRESETS.list.exit),
+        });
+      }
+
+      if (essayPreviewTransitionId.value !== transitionId) {
+        return;
+      }
+
       await loadEssayPreviews(targetPage);
       await nextTick();
       essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
-      await nextTick();
-      essayCardsVisible.value = true;
-    }
 
-    function wait(duration = 0) {
-      return new Promise((resolve) => window.setTimeout(resolve, duration));
-    }
+      if (essayPreviewTransitionId.value !== transitionId) {
+        return;
+      }
+
+      await animatePreviewEnter("essay");
+    };
 
     function persistDraft(type, payload) {
       if (typeof window === "undefined") {
@@ -896,6 +976,7 @@ export default defineComponent({
         if (type === "essay") {
           essayForm.title = data.title || "";
           essayForm.author = data.author || "";
+          essayForm.kind = data.kind || "commentary";
           essayForm.status = data.status || "draft";
           essayForm.summary = data.summary || "";
           essayForm.image = data.image || "";
@@ -968,6 +1049,7 @@ export default defineComponent({
       editingEssaySlug.value = "";
       essayForm.title = "";
       essayForm.author = "";
+      essayForm.kind = "commentary";
       essayForm.status = "draft";
       essayForm.summary = "";
       essayForm.image = "";
@@ -996,6 +1078,7 @@ export default defineComponent({
       editingEssaySlug.value = essay.slug;
       essayForm.title = essay.title || "";
       essayForm.author = essay.author || "";
+      essayForm.kind = essay.kind || "commentary";
       essayForm.status = essay.status || "published";
       essayForm.summary = essay.summary || "";
       essayForm.image = essay.image || "";
@@ -1017,11 +1100,15 @@ export default defineComponent({
     );
 
     watch(poemPreviewCategory, () => {
-      loadPostPreviews(1);
+      transitionPostPreviews(1);
     });
 
     watch(essayPreviewStatus, () => {
-      loadEssayPreviews(1);
+      transitionEssayPreviews(1);
+    });
+
+    watch(essayPreviewKind, () => {
+      transitionEssayPreviews(1);
     });
 
     watch(poemPreviewQuery, () => {
@@ -1030,7 +1117,7 @@ export default defineComponent({
       }
 
       poemPreviewSearchTimer = window.setTimeout(() => {
-        loadPostPreviews(1);
+        transitionPostPreviews(1);
         poemPreviewSearchTimer = null;
       }, 180);
     });
@@ -1041,7 +1128,7 @@ export default defineComponent({
       }
 
       essayPreviewSearchTimer = window.setTimeout(() => {
-        loadEssayPreviews(1);
+        transitionEssayPreviews(1);
         essayPreviewSearchTimer = null;
       }, 180);
     });
@@ -1082,6 +1169,15 @@ export default defineComponent({
       } else {
         poemMessage.value = value;
       }
+    };
+
+    const handleEssayBodyImageUploaded = (fileName) => {
+      essayMessage.value = "";
+      showToast(`Đã chèn ảnh "${fileName}" vào nội dung.`);
+    };
+
+    const handleEssayEditorError = (message) => {
+      essayMessage.value = message || "Không chèn được ảnh vào nội dung.";
     };
 
     const handleImageUpload = async (event, type) => {
@@ -1139,44 +1235,6 @@ export default defineComponent({
         .map((tag) => tag.trim())
         .filter(Boolean);
 
-    const escapeHtml = (value = "") =>
-      String(value)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-
-    const renderInlineMarkdown = (value = "") =>
-      escapeHtml(value)
-        .replace(/`([^`]+)`/g, "<code>$1</code>")
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/\*([^*]+)\*/g, "<em>$1</em>")
-        .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noreferrer">$1</a>');
-
-    const renderMarkdownPreview = (value = "") => {
-      const trimmed = value.trim();
-      if (!trimmed) {
-        return "<p>Chưa có nội dung preview.</p>";
-      }
-
-      return trimmed
-        .split(/\n\s*\n/)
-        .map((block) => block.trim())
-        .filter(Boolean)
-        .map((block) => {
-          const lines = block.split("\n").map((line) => line.trimRight());
-          if (lines.length === 1 && /^##\s+/.test(lines[0])) {
-            return `<h3>${renderInlineMarkdown(lines[0].replace(/^##\s+/, ""))}</h3>`;
-          }
-          if (lines.length === 1 && /^#\s+/.test(lines[0])) {
-            return `<h2>${renderInlineMarkdown(lines[0].replace(/^#\s+/, ""))}</h2>`;
-          }
-          return `<p>${lines.map((line) => renderInlineMarkdown(line)).join("<br />")}</p>`;
-        })
-        .join("");
-    };
-
     watch(
       poemForm,
       (value) => {
@@ -1206,8 +1264,6 @@ export default defineComponent({
       },
       { deep: true }
     );
-
-    const essayMarkdownPreview = computed(() => renderMarkdownPreview(essayForm.body));
 
     const submitPoem = async () => {
       poemMessage.value = "";
@@ -1253,14 +1309,15 @@ export default defineComponent({
     const submitEssay = async () => {
       essayMessage.value = "";
       const title = essayForm.title.trim();
-      const body = essayForm.body.trim();
+      const body = sanitizeEssayHtml(essayForm.body);
+      const bodyText = stripEssayText(body);
 
       if (!title) {
         essayMessage.value = "Hãy nhập tiêu đề cho bài luận.";
         return;
       }
 
-      if (!body) {
+      if (!bodyText) {
         essayMessage.value = "Hãy nhập nội dung bài luận hoặc ghi chép.";
         return;
       }
@@ -1269,6 +1326,7 @@ export default defineComponent({
         const payload = {
           title,
           author: essayForm.author,
+          kind: essayForm.kind,
           summary: essayForm.summary,
           image: essayForm.image,
           body,
@@ -1336,14 +1394,13 @@ export default defineComponent({
     };
 
     const excerptEssay = (value = "") => {
-      const normalized = value.replace(/\s+/g, " ").trim();
-      if (normalized.length <= 180) {
-        return normalized;
-      }
-      return `${normalized.slice(0, 177)}...`;
+      return excerptEssayContent(value, 180);
     };
 
     const formatPageNumber = (value) => String(Math.max(1, Number(value) || 1)).padStart(2, "0");
+
+    const formatEssayKind = (value = "") =>
+      value === "research" ? "Nghiên cứu" : "Bình luận";
 
     const formatDate = (value) => {
       if (!value) return "";
@@ -1373,6 +1430,8 @@ export default defineComponent({
       if (typeof window !== "undefined") {
         window.removeEventListener("resize", handleResize);
       }
+      killMotion(getPreviewItems("poem"));
+      killMotion(getPreviewItems("essay"));
     });
 
     return {
@@ -1381,6 +1440,8 @@ export default defineComponent({
       essayImageInput,
       poemPreviewSection,
       essayPreviewSection,
+      poemPreviewList,
+      essayPreviewList,
       editingPostId,
       editingEssaySlug,
       poemForm,
@@ -1409,12 +1470,12 @@ export default defineComponent({
       showEssayAuthorSuggestions,
       poemPreviewQuery,
       essayPreviewQuery,
+      essayPreviewKind,
       poemPreviewCategory,
       essayPreviewStatus,
+      essayPreviewKindOptions,
       essayPreviewStatusOptions,
-      poemExitDurationMs,
-      essayExitDurationMs,
-      previewRowDelay,
+      essayKindOptions,
       canEdit,
       categoryOptions,
       loading,
@@ -1434,8 +1495,10 @@ export default defineComponent({
       removeEssay,
       formatDate,
       formatPageNumber,
+      formatEssayKind,
       excerptEssay,
-      essayMarkdownPreview,
+      handleEssayBodyImageUploaded,
+      handleEssayEditorError,
       openAuthorSuggestions,
       scheduleAuthorSuggestionsClose,
       selectSuggestedAuthor,
@@ -1593,17 +1656,19 @@ export default defineComponent({
   transform: scaleX(1);
 }
 
+[data-theme="light"] .write-page__mode-tab--active {
+  color: rgb(var(--color-text-rgb) / 0.88);
+}
+
 .write-form {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 1.25rem;
   align-items: start;
   padding: 1.5rem;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-soft);
   border-radius: 24px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
-    rgba(27, 25, 25, 0.38);
+  background: var(--surface-panel-bg);
   backdrop-filter: blur(10px);
 }
 
@@ -1611,6 +1676,18 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   align-items: stretch;
+}
+
+.write-form__essay-head {
+  display: grid;
+  grid-template-columns:
+    minmax(0, 1.45fr)
+    minmax(0, 1.15fr)
+    minmax(0, 0.9fr)
+    minmax(0, 0.9fr);
+  gap: 1.25rem;
+  grid-column: 1 / -1;
+  min-width: 0;
 }
 
 .form-field__autocomplete {
@@ -1627,11 +1704,11 @@ export default defineComponent({
   gap: 0.25rem;
   padding: 0.35rem;
   border-radius: 14px;
-  border: 1px solid rgba(177, 165, 159, 0.1);
+  border: 1px solid var(--border-soft);
   background: var(--color-bg, #2f2c2b);
   box-shadow:
     0 18px 48px rgba(0, 0, 0, 0.22),
-    0 0 0 1px rgba(255, 255, 255, 0.015);
+    0 0 0 1px var(--surface-subtle-bg);
 }
 
 .form-field__autocomplete-option {
@@ -1639,7 +1716,7 @@ export default defineComponent({
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: #b1a59f;
+  color: var(--color-text);
   padding: 0.72rem 0.8rem;
   text-align: left;
   font: inherit;
@@ -1651,8 +1728,8 @@ export default defineComponent({
 }
 
 .form-field__autocomplete-option:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: #e6e0db;
+  background: var(--surface-input-focus-bg);
+  color: var(--color-text);
 }
 
 .form-field:not(.form-field--wide) {
@@ -1686,8 +1763,8 @@ export default defineComponent({
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: rgba(177, 165, 159, 0.82);
+  border: 1px solid var(--border-regular);
+  color: var(--color-muted);
   font-size: 0.72rem;
   line-height: 1;
   cursor: help;
@@ -1702,9 +1779,9 @@ export default defineComponent({
   max-width: 18rem;
   padding: 0.65rem 0.75rem;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(18, 18, 18, 0.96);
-  color: rgba(230, 224, 219, 0.88);
+  border: 1px solid var(--border-soft);
+  background: var(--color-bg);
+  color: var(--color-muted);
   font-size: 0.8rem;
   line-height: 1.45;
   opacity: 0;
@@ -1736,9 +1813,9 @@ export default defineComponent({
 .input,
 .write-form textarea {
   width: 100%;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #b1a59f;
+  background: var(--surface-input-bg);
+  border: 1px solid var(--surface-input-border);
+  color: var(--color-text);
   padding: 0.75rem 1rem;
   border-radius: 8px;
   font-size: 1rem;
@@ -1764,17 +1841,13 @@ export default defineComponent({
   padding: 0.7rem 0.9rem;
   min-height: 3.45rem;
   border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.015)),
-    rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle-bg);
 }
 
 .upload-field--filled {
-  border-color: rgba(177, 165, 159, 0.22);
-  background:
-    linear-gradient(180deg, rgba(177, 165, 159, 0.06), rgba(255, 255, 255, 0.02)),
-    rgba(255, 255, 255, 0.02);
+  border-color: var(--focus-border);
+  background: var(--surface-soft-bg);
 }
 
 .upload-field__input {
@@ -1800,7 +1873,7 @@ export default defineComponent({
 }
 
 .upload-field__title {
-  color: #b1a59f;
+  color: var(--color-text);
   font-size: 0.92rem;
   line-height: 1.3;
 }
@@ -1821,9 +1894,9 @@ export default defineComponent({
 .upload-field__button {
   padding: 0.42rem 0.72rem;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.04);
-  color: #b1a59f;
+  border: 1px solid var(--border-regular);
+  background: var(--surface-input-bg);
+  color: var(--color-text);
   cursor: pointer;
   font-size: 0.8rem;
   line-height: 1;
@@ -1858,9 +1931,9 @@ export default defineComponent({
   min-height: 10rem;
   padding: 1rem 1.15rem;
   border-radius: 14px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.02);
-  color: rgba(230, 224, 219, 0.92);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle-bg);
+  color: var(--color-muted);
 }
 
 .write-form__markdown-body :deep(p),
@@ -1888,27 +1961,37 @@ export default defineComponent({
 .write-form__markdown-body :deep(code) {
   padding: 0.08rem 0.35rem;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-strong-bg);
 }
 
 .input:focus,
 .write-form textarea:focus {
-  outline: 1px solid rgba(177, 165, 159, 0.42);
-  border-color: rgba(177, 165, 159, 0.28);
-  background: rgba(255, 255, 255, 0.055);
+  outline: 1px solid var(--focus-outline);
+  border-color: var(--focus-border);
+  background: var(--surface-input-focus-bg);
   box-shadow:
-    0 0 0 3px rgba(177, 165, 159, 0.08),
+    0 0 0 3px var(--focus-ring),
     0 10px 24px rgba(0, 0, 0, 0.12);
 }
 
 .submit-btn {
-  padding: 0.75rem 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  background: rgba(255, 255, 255, 0.06);
-  color: #b1a59f;
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.58rem 0.88rem;
+  border: 1px solid rgb(var(--color-text-rgb) / 0.14);
+  background: rgb(var(--color-text-rgb) / 0.045);
+  color: var(--color-text);
+  border-radius: 999px;
   cursor: pointer;
   font: inherit;
+  font-size: 0.92rem;
+  line-height: 1.1;
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease,
+    transform 180ms ease;
 }
 
 .write-form__actions {
@@ -1916,10 +1999,11 @@ export default defineComponent({
   display: flex;
   flex-wrap: wrap;
   gap: 0.8rem;
+  justify-content: flex-end;
 }
 
 .write-form__actions .submit-btn {
-  min-width: 11rem;
+  min-width: 8.8rem;
 }
 
 .submit-btn--ghost {
@@ -1927,7 +2011,8 @@ export default defineComponent({
 }
 
 .submit-btn:hover {
-  background: rgba(221, 82, 90, 0.1);
+  border-color: rgb(var(--color-text-rgb) / 0.22);
+  background: rgb(var(--color-text-rgb) / 0.075);
 }
 
 .form-feedback {
@@ -1962,11 +2047,14 @@ export default defineComponent({
   gap: 0.5rem;
   min-width: 12.5rem;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(177, 165, 159, 0.24);
+  border-bottom: 1px solid rgb(var(--color-text-rgb) / 0.2);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
 }
 
 .write-page__preview-search-icon {
-  color: rgba(177, 165, 159, 0.6);
+  color: rgb(var(--color-text-rgb) / 0.58);
   font-size: 0.95rem;
   line-height: 1;
   flex: 0 0 auto;
@@ -1977,7 +2065,7 @@ export default defineComponent({
   min-width: 0;
   border: 0;
   background: transparent;
-  color: #b1a59f;
+  color: var(--color-text);
   font: inherit;
   font-size: 0.92rem;
   line-height: 1.2;
@@ -1986,7 +2074,7 @@ export default defineComponent({
 }
 
 .write-page__preview-search-input::placeholder {
-  color: rgba(177, 165, 159, 0.45);
+  color: rgb(var(--color-text-rgb) / 0.42);
 }
 
 .write-page__preview-filter {
@@ -1994,11 +2082,14 @@ export default defineComponent({
   align-items: center;
   gap: 0.55rem;
   padding-bottom: 0.35rem;
-  border-bottom: 1px solid rgba(177, 165, 159, 0.24);
+  border-bottom: 1px solid rgb(var(--color-text-rgb) / 0.2);
+  transition:
+    border-color 180ms ease,
+    background-color 180ms ease;
 }
 
 .write-page__preview-filter-label {
-  color: rgba(177, 165, 159, 0.52);
+  color: rgb(var(--color-text-rgb) / 0.48);
   font-size: 0.74rem;
   line-height: 1;
   letter-spacing: 0.12em;
@@ -2029,6 +2120,27 @@ export default defineComponent({
   font-size: 1rem;
 }
 
+[data-theme="light"] .write-page__preview-search,
+[data-theme="light"] .write-page__preview-filter {
+  padding: 0.48rem 0.7rem;
+  padding-bottom: 0.48rem;
+  border: 1px solid rgb(var(--color-text-rgb) / 0.14);
+  border-radius: 999px;
+  background: rgb(var(--color-text-rgb) / 0.035);
+}
+
+[data-theme="light"] .write-page__preview-search:hover,
+[data-theme="light"] .write-page__preview-search:focus-within,
+[data-theme="light"] .write-page__preview-filter:hover,
+[data-theme="light"] .write-page__preview-filter:focus-within {
+  border-color: rgb(var(--color-text-rgb) / 0.22);
+  background: rgb(var(--color-text-rgb) / 0.055);
+}
+
+[data-theme="light"] .write-page__preview-filter-select :deep(.elegant-select__trigger) {
+  color: var(--color-text);
+}
+
 .write-page__subheading {
   margin: 0;
   font-family: var(--font-title);
@@ -2054,25 +2166,6 @@ export default defineComponent({
   color: rgba(177, 165, 159, 0.7);
 }
 
-.write-page__preview-card-enter-active {
-  transition:
-    opacity 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
-  transition-delay: var(--preview-delay, 0ms);
-}
-
-.write-page__preview-card-leave-active {
-  transition:
-    opacity var(--preview-exit-duration, 360ms) cubic-bezier(0.22, 1, 0.36, 1),
-    transform var(--preview-exit-duration, 360ms) cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.write-page__preview-card-enter-from,
-.write-page__preview-card-leave-to {
-  opacity: 0;
-  transform: translate3d(0, 0.6rem, 0);
-}
-
 .write-page__preview-list--poems {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
@@ -2092,6 +2185,10 @@ export default defineComponent({
   display: flex;
   flex-direction: column;
   gap: 1rem;
+}
+
+[data-theme="light"] .write-page__preview {
+  border-color: rgb(18 18 18 / 0.14);
 }
 
 .write-page__preview--essay {
@@ -2131,7 +2228,7 @@ export default defineComponent({
 
 .write-page__essay-summary,
 .write-page__essay-tags,
-.write-page__essay-status {
+.write-page__essay-meta-line {
   margin: 0;
   color: var(--color-description);
   font-size: 0.98rem;
@@ -2139,7 +2236,7 @@ export default defineComponent({
   overflow-wrap: anywhere;
 }
 
-.write-page__essay-status {
+.write-page__essay-meta-line {
   opacity: 0.86;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -2150,13 +2247,21 @@ export default defineComponent({
   opacity: 0.76;
 }
 
+.write-page__preview-footer {
+  margin-top: auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem;
+}
+
 .write-page__preview-meta {
-  margin-top: 1rem;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.6rem;
+  gap: 0.35rem;
   min-width: 0;
+  text-align: left;
 }
 
 .write-page__preview-author,
@@ -2165,7 +2270,15 @@ export default defineComponent({
   text-decoration: none;
   font-size: 0.95rem;
   line-height: 1.4;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+}
+
+.write-page__preview-poster {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  line-height: 1.35;
+  white-space: nowrap;
 }
 
 .write-page__preview-link:hover,
@@ -2174,10 +2287,10 @@ export default defineComponent({
 }
 
 .write-page__preview-actions {
-  margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+  justify-content: flex-end;
 }
 
 .write-page__preview-action {
@@ -2193,8 +2306,28 @@ export default defineComponent({
 }
 
 .write-page__preview-action--danger {
-  border-color: rgba(221, 82, 90, 0.28);
-  color: #f0b9b0;
+  border-color: rgba(221, 82, 90, 0.34);
+  color: rgba(221, 82, 90, 0.78);
+}
+
+@media (max-width: 1180px) {
+  .write-form__essay-head {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .write-page__preview-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+
+  .write-page__preview-meta,
+  .write-page__preview-actions {
+    align-items: flex-start;
+    justify-content: flex-start;
+    text-align: left;
+  }
 }
 
 .write-page__pagination {
@@ -2293,6 +2426,11 @@ export default defineComponent({
   .write-page__preview-list--poems,
   .write-page__preview-list--essays {
     grid-template-columns: 1fr;
+  }
+
+  .write-form__essay-head {
+    grid-template-columns: 1fr;
+    grid-column: 1 / -1;
   }
 
   .write-page__pagination {

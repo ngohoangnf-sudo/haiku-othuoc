@@ -1,0 +1,390 @@
+<template>
+  <div class="rich-editor" :class="{ 'rich-editor--disabled': disabled }">
+    <div class="rich-editor__toolbar">
+      <button
+        v-for="action in toolbarActions"
+        :key="action.key"
+        class="rich-editor__tool"
+        :class="{ 'rich-editor__tool--active': action.active?.() }"
+        type="button"
+        :disabled="disabled"
+        @click="action.run"
+      >
+        {{ action.label }}
+      </button>
+      <button class="rich-editor__tool" type="button" :disabled="disabled" @click="openImagePicker">
+        Ảnh
+      </button>
+    </div>
+
+    <EditorContent :editor="editor" class="rich-editor__content" />
+
+    <input
+      ref="imageInput"
+      class="rich-editor__image-input"
+      type="file"
+      accept="image/*"
+      @change="handleImageSelected"
+    />
+  </div>
+</template>
+
+<script>
+import { computed, defineComponent, onBeforeUnmount, ref, watch } from "vue";
+import { EditorContent, useEditor } from "@tiptap/vue-3";
+import StarterKit from "@tiptap/starter-kit";
+import Image from "@tiptap/extension-image";
+import Placeholder from "@tiptap/extension-placeholder";
+import { normalizeEssayBodyHtml } from "src/utils/essayContent";
+
+const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
+    reader.readAsDataURL(file);
+  });
+}
+
+export default defineComponent({
+  name: "RichEssayEditor",
+  components: {
+    EditorContent,
+  },
+  props: {
+    modelValue: {
+      type: String,
+      default: "",
+    },
+    placeholder: {
+      type: String,
+      default: "",
+    },
+    disabled: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  emits: ["update:modelValue", "image-uploaded", "error"],
+  setup(props, { emit }) {
+    const imageInput = ref(null);
+    const editor = useEditor({
+      content: normalizeEssayBodyHtml(props.modelValue),
+      editable: !props.disabled,
+      extensions: [
+        StarterKit.configure({
+          heading: {
+            levels: [2, 3],
+          },
+        }),
+        Image.configure({
+          inline: false,
+          allowBase64: true,
+          HTMLAttributes: {
+            class: "essay-inline-image",
+          },
+        }),
+        Placeholder.configure({
+          placeholder: props.placeholder,
+        }),
+      ],
+      onUpdate: ({ editor: editorInstance }) => {
+        emit("update:modelValue", editorInstance.getHTML());
+      },
+    });
+
+    watch(
+      () => props.modelValue,
+      (value) => {
+        if (!editor.value) {
+          return;
+        }
+
+        const normalized = normalizeEssayBodyHtml(value);
+        if (normalized === editor.value.getHTML()) {
+          return;
+        }
+
+        editor.value.commands.setContent(normalized, false);
+      }
+    );
+
+    watch(
+      () => props.disabled,
+      (value) => {
+        editor.value?.setEditable(!value);
+      },
+      { immediate: true }
+    );
+
+    const toolbarActions = computed(() => {
+      const instance = editor.value;
+      if (!instance) {
+        return [];
+      }
+
+      return [
+        {
+          key: "bold",
+          label: "B",
+          active: () => instance.isActive("bold"),
+          run: () => instance.chain().focus().toggleBold().run(),
+        },
+        {
+          key: "italic",
+          label: "I",
+          active: () => instance.isActive("italic"),
+          run: () => instance.chain().focus().toggleItalic().run(),
+        },
+        {
+          key: "h2",
+          label: "H2",
+          active: () => instance.isActive("heading", { level: 2 }),
+          run: () => instance.chain().focus().toggleHeading({ level: 2 }).run(),
+        },
+        {
+          key: "h3",
+          label: "H3",
+          active: () => instance.isActive("heading", { level: 3 }),
+          run: () => instance.chain().focus().toggleHeading({ level: 3 }).run(),
+        },
+        {
+          key: "bullet",
+          label: "•",
+          active: () => instance.isActive("bulletList"),
+          run: () => instance.chain().focus().toggleBulletList().run(),
+        },
+        {
+          key: "quote",
+          label: "❝",
+          active: () => instance.isActive("blockquote"),
+          run: () => instance.chain().focus().toggleBlockquote().run(),
+        },
+        {
+          key: "rule",
+          label: "—",
+          active: () => false,
+          run: () => instance.chain().focus().setHorizontalRule().run(),
+        },
+      ];
+    });
+
+    const openImagePicker = () => {
+      if (!editor.value || props.disabled) {
+        return;
+      }
+      imageInput.value?.click();
+    };
+
+    const handleImageSelected = async (event) => {
+      const file = event.target?.files?.[0];
+      if (!file) {
+        return;
+      }
+
+      if (!file.type.startsWith("image/")) {
+        emit("error", "Vui lòng chọn một file ảnh hợp lệ.");
+        event.target.value = "";
+        return;
+      }
+
+      if (file.size > MAX_IMAGE_SIZE_BYTES) {
+        emit("error", "Ảnh quá lớn. Hãy chọn ảnh nhỏ hơn 5MB.");
+        event.target.value = "";
+        return;
+      }
+
+      try {
+        const src = await readFileAsDataUrl(file);
+        if (!editor.value) {
+          emit("error", "Trình soạn thảo chưa sẵn sàng.");
+          return;
+        }
+
+        const inserted = editor.value
+          .chain()
+          .focus()
+          .insertContent([
+            {
+              type: "image",
+              attrs: {
+                src,
+                alt: file.name,
+              },
+            },
+            {
+              type: "paragraph",
+            },
+          ])
+          .run();
+
+        if (!inserted) {
+          emit("error", "Không chèn được ảnh vào nội dung.");
+          return;
+        }
+
+        emit("image-uploaded", file.name);
+      } catch (_error) {
+        emit("error", "Không đọc được file ảnh. Thử lại.");
+      } finally {
+        event.target.value = "";
+      }
+    };
+
+    onBeforeUnmount(() => {
+      editor.value?.destroy();
+    });
+
+    return {
+      editor,
+      imageInput,
+      toolbarActions,
+      openImagePicker,
+      handleImageSelected,
+    };
+  },
+});
+</script>
+
+<style scoped>
+.rich-editor {
+  display: grid;
+  gap: 0.85rem;
+  min-width: 0;
+}
+
+.rich-editor--disabled {
+  opacity: 0.72;
+}
+
+.rich-editor__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.rich-editor__tool {
+  min-width: 2.35rem;
+  padding: 0.42rem 0.68rem;
+  border-radius: 999px;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-subtle-bg);
+  color: var(--color-text);
+  font: inherit;
+  font-size: 0.84rem;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.rich-editor__tool:hover,
+.rich-editor__tool--active {
+  border-color: var(--focus-border);
+  background: var(--surface-soft-bg);
+}
+
+.rich-editor__tool:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.rich-editor__content {
+  min-height: 20rem;
+  border: 1px solid var(--surface-input-border);
+  border-radius: 18px;
+  background: var(--surface-input-bg);
+  color: var(--color-text);
+  overflow: hidden;
+}
+
+.rich-editor__content :deep(.tiptap) {
+  min-height: 20rem;
+  padding: 1.1rem 1.15rem;
+  outline: none;
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.rich-editor__content :deep(.tiptap p) {
+  margin: 0;
+}
+
+.rich-editor__content :deep(.tiptap p + p),
+.rich-editor__content :deep(.tiptap h2 + p),
+.rich-editor__content :deep(.tiptap h3 + p),
+.rich-editor__content :deep(.tiptap p + h2),
+.rich-editor__content :deep(.tiptap p + h3),
+.rich-editor__content :deep(.tiptap ul + p),
+.rich-editor__content :deep(.tiptap blockquote + p),
+.rich-editor__content :deep(.tiptap img + p) {
+  margin-top: 1rem;
+}
+
+.rich-editor__content :deep(.tiptap h2),
+.rich-editor__content :deep(.tiptap h3) {
+  margin: 0;
+  font-family: var(--font-title);
+  font-weight: var(--font-weight-title);
+  color: var(--color-title);
+  line-height: 1.1;
+}
+
+.rich-editor__content :deep(.tiptap h2) {
+  font-size: 1.65rem;
+}
+
+.rich-editor__content :deep(.tiptap h3) {
+  font-size: 1.3rem;
+}
+
+.rich-editor__content :deep(.tiptap ul) {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+
+.rich-editor__content :deep(.tiptap blockquote) {
+  margin: 0;
+  padding-left: 1rem;
+  border-left: 1px solid var(--border-regular);
+  color: var(--color-description);
+}
+
+.rich-editor__content :deep(.tiptap hr) {
+  border: 0;
+  border-top: 1px solid var(--border-soft);
+  margin: 1.2rem 0;
+}
+
+.rich-editor__content :deep(.tiptap img) {
+  display: block;
+  width: min(100%, 34rem);
+  border-radius: 14px;
+  margin: 1.2rem 0;
+}
+
+.rich-editor__content :deep(.tiptap p.is-editor-empty:first-child::before) {
+  content: attr(data-placeholder);
+  color: var(--color-muted-ghost);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.rich-editor__image-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+[data-theme="light"] .rich-editor__content {
+  background: rgb(var(--color-text-rgb) / 0.03);
+}
+</style>

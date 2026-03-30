@@ -16,6 +16,9 @@ const state = reactive({
   activity: [],
   activityLoading: false,
   activityError: "",
+  selfActivity: [],
+  selfActivityLoading: false,
+  selfActivityError: "",
 });
 
 let sessionPromise = null;
@@ -182,7 +185,49 @@ async function logout() {
     applyViewerState();
     state.users = [];
     state.activity = [];
+    state.selfActivity = [];
   }
+}
+
+async function loadProfile(force = false) {
+  if (state.loading && !force) {
+    return state.user;
+  }
+
+  if (state.user && !force) {
+    return state.user;
+  }
+
+  const response = await fetch(`${API_BASE}/me`, {
+    headers: getAuthHeaders(),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseResponseError(response, "Không tải được thông tin cá nhân."));
+  }
+
+  const user = await response.json();
+  applyUserState(user || null);
+  return state.user;
+}
+
+async function updateProfile(payload) {
+  const response = await fetch(`${API_BASE}/me`, {
+    method: "PATCH",
+    headers: getAuthHeaders({
+      "Content-Type": "application/json",
+    }),
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseResponseError(response, "Không cập nhật được thông tin cá nhân."));
+  }
+
+  const user = await response.json();
+  applyUserState(user || null);
+  state.users = state.users.map((item) => (item.id === user.id ? user : item));
+  return user;
 }
 
 async function loadUsers(force = false) {
@@ -288,6 +333,38 @@ async function loadActivity(force = false, limit = 100) {
   return state.activity;
 }
 
+async function loadSelfActivity(force = false, limit = 100) {
+  if (state.selfActivityLoading) {
+    return state.selfActivity;
+  }
+
+  if (state.selfActivity.length && !force) {
+    return state.selfActivity;
+  }
+
+  state.selfActivityLoading = true;
+  state.selfActivityError = "";
+
+  try {
+    const response = await fetch(`${API_BASE}/me/activity?limit=${encodeURIComponent(limit)}`, {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      throw new Error(await parseResponseError(response, "Không tải được nhật ký hoạt động của bạn."));
+    }
+
+    const data = await response.json();
+    state.selfActivity = Array.isArray(data) ? data : [];
+  } catch (error) {
+    state.selfActivityError = error.message || "Không tải được nhật ký hoạt động của bạn.";
+    throw error;
+  } finally {
+    state.selfActivityLoading = false;
+  }
+
+  return state.selfActivity;
+}
+
 function canEdit() {
   return state.role === "editor" || state.role === "admin";
 }
@@ -301,10 +378,13 @@ export default {
   ensureSession,
   login,
   logout,
+  loadProfile,
+  updateProfile,
   loadUsers,
   createUser,
   updateUser,
   loadActivity,
+  loadSelfActivity,
   getAuthHeaders,
   canEdit,
   isAdmin,

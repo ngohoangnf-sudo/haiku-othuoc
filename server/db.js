@@ -54,6 +54,13 @@ function mapPoemRow(row) {
     lines: Array.isArray(row.lines) ? row.lines : [],
     summary: row.summary || "",
     image: row.image || "",
+    postedBy: row.postedById
+      ? {
+          id: row.postedById,
+          username: row.postedByUsername,
+          displayName: row.postedByDisplayName || row.postedByUsername || "",
+        }
+      : null,
     publishedAt: row.publishedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -65,11 +72,19 @@ function mapEssayRow(row) {
     id: row.id,
     slug: row.slug,
     title: row.title,
+    kind: row.kind || "commentary",
     author: row.author || "",
     authorSlug: row.authorSlug || "",
     summary: row.summary || "",
     body: row.body || "",
     image: row.image || "",
+    postedBy: row.postedById
+      ? {
+          id: row.postedById,
+          username: row.postedByUsername,
+          displayName: row.postedByDisplayName || row.postedByUsername || "",
+        }
+      : null,
     tags: Array.isArray(row.tags) ? row.tags : [],
     status: row.status || "draft",
     publishedAt: row.publishedAt,
@@ -141,6 +156,41 @@ async function init() {
     for (const statement of statements) {
       await pool.query(statement);
     }
+
+    await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'commentary'
+    `);
+    await pool.query(`
+      UPDATE essays
+      SET kind = 'commentary'
+      WHERE kind IS NULL OR kind = ''
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      DROP CONSTRAINT IF EXISTS essays_kind_check
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD CONSTRAINT essays_kind_check
+      CHECK (kind IN ('research', 'commentary'))
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_poems_created_by_user_id
+        ON poems (created_by_user_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_essays_created_by_user_id
+        ON essays (created_by_user_id)
+    `);
   })();
 
   return initPromise;
@@ -568,10 +618,19 @@ async function insertActivityLog(entry) {
   );
 }
 
-async function getActivityLogs(limit = 100) {
+async function getActivityLogs(limit = 100, actorUserId = "") {
   await init();
 
   const safeLimit = Math.max(1, Math.min(Number(limit) || 50, 200));
+  const values = [safeLimit];
+  const clauses = [];
+
+  if (actorUserId) {
+    values.push(actorUserId);
+    clauses.push(`l.actor_user_id = $${values.length}`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const result = await pool.query(
     `
       SELECT
@@ -589,10 +648,11 @@ async function getActivityLogs(limit = 100) {
         u.role AS "actorRole"
       FROM activity_logs l
       LEFT JOIN users u ON u.id = l.actor_user_id
+      ${where}
       ORDER BY l.created_at DESC
       LIMIT $1
     `,
-    [safeLimit]
+    values
   );
 
   return result.rows.map(mapActivityRow);
@@ -644,6 +704,9 @@ async function getAllPosts(filters = {}) {
         p.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
@@ -651,10 +714,11 @@ async function getAllPosts(filters = {}) {
         ) AS lines
       FROM poems p
       JOIN authors a ON a.id = p.author_id
+      LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
       ${where}
-      GROUP BY p.id, a.id, m.id
+      GROUP BY p.id, a.id, u.id, m.id
       ORDER BY p.published_at DESC NULLS LAST, p.created_at DESC
     `,
     values
@@ -735,6 +799,9 @@ async function getPagedPosts(filters = {}, pagination = {}) {
         p.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
@@ -742,10 +809,11 @@ async function getPagedPosts(filters = {}, pagination = {}) {
         ) AS lines
       FROM poems p
       JOIN authors a ON a.id = p.author_id
+      LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
       ${where}
-      GROUP BY p.id, a.id, m.id
+      GROUP BY p.id, a.id, u.id, m.id
       ${orderClause}
       LIMIT $${itemsValues.length + 1}
       OFFSET $${itemsValues.length + 2}
@@ -778,6 +846,9 @@ async function getPostById(id) {
         p.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
@@ -785,10 +856,11 @@ async function getPostById(id) {
         ) AS lines
       FROM poems p
       JOIN authors a ON a.id = p.author_id
+      LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
       WHERE p.id = $1
-      GROUP BY p.id, a.id, m.id
+      GROUP BY p.id, a.id, u.id, m.id
     `,
     [id]
   );
@@ -812,6 +884,9 @@ async function getRandomPostWithImage() {
         p.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(pl.content ORDER BY pl.line_number) FILTER (WHERE pl.content IS NOT NULL),
@@ -819,10 +894,11 @@ async function getRandomPostWithImage() {
         ) AS lines
       FROM poems p
       JOIN authors a ON a.id = p.author_id
+      LEFT JOIN users u ON u.id = p.created_by_user_id
       JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
       WHERE COALESCE(m.source, '') <> ''
-      GROUP BY p.id, a.id, m.id
+      GROUP BY p.id, a.id, u.id, m.id
       ORDER BY random()
       LIMIT 1
     `
@@ -840,6 +916,11 @@ async function getAllEssays(filters = {}) {
   if (filters.authorSlug) {
     values.push(filters.authorSlug);
     clauses.push(`a.slug = $${values.length}`);
+  }
+
+  if (filters.kind) {
+    values.push(filters.kind);
+    clauses.push(`e.kind = $${values.length}`);
   }
 
   if (filters.tagSlug) {
@@ -886,6 +967,7 @@ async function getAllEssays(filters = {}) {
         e.id,
         e.slug,
         e.title,
+        e.kind,
         e.summary,
         e.body,
         e.status,
@@ -894,6 +976,9 @@ async function getAllEssays(filters = {}) {
         e.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(
@@ -903,11 +988,12 @@ async function getAllEssays(filters = {}) {
         ) AS tags
       FROM essays e
       LEFT JOIN authors a ON a.id = e.author_id
+      LEFT JOIN users u ON u.id = e.created_by_user_id
       LEFT JOIN media_assets m ON m.id = e.cover_media_id
       LEFT JOIN essay_tag_links etl ON etl.essay_id = e.id
       LEFT JOIN essay_tags t ON t.id = etl.tag_id
       ${where}
-      GROUP BY e.id, a.id, m.id
+      GROUP BY e.id, a.id, u.id, m.id
       ORDER BY e.published_at DESC NULLS LAST, e.created_at DESC
     `,
     values
@@ -925,6 +1011,11 @@ async function getPagedEssays(filters = {}, pagination = {}) {
   if (filters.authorSlug) {
     values.push(filters.authorSlug);
     clauses.push(`a.slug = $${values.length}`);
+  }
+
+  if (filters.kind) {
+    values.push(filters.kind);
+    clauses.push(`e.kind = $${values.length}`);
   }
 
   if (filters.tagSlug) {
@@ -988,6 +1079,7 @@ async function getPagedEssays(filters = {}, pagination = {}) {
         e.id,
         e.slug,
         e.title,
+        e.kind,
         e.summary,
         e.body,
         e.status,
@@ -996,6 +1088,9 @@ async function getPagedEssays(filters = {}, pagination = {}) {
         e.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(
@@ -1005,11 +1100,12 @@ async function getPagedEssays(filters = {}, pagination = {}) {
         ) AS tags
       FROM essays e
       LEFT JOIN authors a ON a.id = e.author_id
+      LEFT JOIN users u ON u.id = e.created_by_user_id
       LEFT JOIN media_assets m ON m.id = e.cover_media_id
       LEFT JOIN essay_tag_links etl ON etl.essay_id = e.id
       LEFT JOIN essay_tags t ON t.id = etl.tag_id
       ${where}
-      GROUP BY e.id, a.id, m.id
+      GROUP BY e.id, a.id, u.id, m.id
       ORDER BY e.published_at DESC NULLS LAST, e.created_at DESC
       LIMIT $${values.length + 1}
       OFFSET $${values.length + 2}
@@ -1035,6 +1131,11 @@ async function getEssayTags(filters = {}) {
   if (filters.status !== null) {
     values.push(filters.status || "published");
     clauses.push(`e.status = $${values.length}`);
+  }
+
+  if (filters.kind) {
+    values.push(filters.kind);
+    clauses.push(`e.kind = $${values.length}`);
   }
 
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
@@ -1071,6 +1172,7 @@ async function getEssayById(id) {
         e.id,
         e.slug,
         e.title,
+        e.kind,
         e.summary,
         e.body,
         e.status,
@@ -1079,6 +1181,9 @@ async function getEssayById(id) {
         e.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(
@@ -1088,11 +1193,12 @@ async function getEssayById(id) {
         ) AS tags
       FROM essays e
       LEFT JOIN authors a ON a.id = e.author_id
+      LEFT JOIN users u ON u.id = e.created_by_user_id
       LEFT JOIN media_assets m ON m.id = e.cover_media_id
       LEFT JOIN essay_tag_links etl ON etl.essay_id = e.id
       LEFT JOIN essay_tags t ON t.id = etl.tag_id
       WHERE e.id = $1
-      GROUP BY e.id, a.id, m.id
+      GROUP BY e.id, a.id, u.id, m.id
     `,
     [id]
   );
@@ -1117,6 +1223,7 @@ async function getEssayBySlug(slug, options = {}) {
         e.id,
         e.slug,
         e.title,
+        e.kind,
         e.summary,
         e.body,
         e.status,
@@ -1125,6 +1232,9 @@ async function getEssayBySlug(slug, options = {}) {
         e.updated_at AS "updatedAt",
         a.display_name AS author,
         a.slug AS "authorSlug",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
         COALESCE(
           json_agg(
@@ -1134,11 +1244,12 @@ async function getEssayBySlug(slug, options = {}) {
         ) AS tags
       FROM essays e
       LEFT JOIN authors a ON a.id = e.author_id
+      LEFT JOIN users u ON u.id = e.created_by_user_id
       LEFT JOIN media_assets m ON m.id = e.cover_media_id
       LEFT JOIN essay_tag_links etl ON etl.essay_id = e.id
       LEFT JOIN essay_tags t ON t.id = etl.tag_id
       WHERE ${clauses.join(" AND ")}
-      GROUP BY e.id, a.id, m.id
+      GROUP BY e.id, a.id, u.id, m.id
     `,
     values
   );
@@ -1164,6 +1275,7 @@ async function insertPost(post) {
             slug,
             title,
             author_id,
+            created_by_user_id,
             category,
             summary,
             media_asset_id,
@@ -1172,13 +1284,14 @@ async function insertPost(post) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, 'published', $8, $9, $10)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', $9, $10, $11)
         `,
         [
           post.id,
           post.slug || null,
           post.title || "",
           authorId,
+          post.createdByUserId || null,
           post.category,
           post.summary || "",
           mediaAssetId,
@@ -1280,6 +1393,8 @@ async function insertEssay(essay) {
             slug,
             title,
             author_id,
+            created_by_user_id,
+            kind,
             summary,
             body,
             cover_media_id,
@@ -1288,13 +1403,15 @@ async function insertEssay(essay) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         `,
         [
           essay.id,
           essay.slug,
           essay.title,
           authorId,
+          essay.createdByUserId || null,
+          essay.kind || "commentary",
           essay.summary || "",
           essay.body || "",
           mediaAssetId,
@@ -1354,12 +1471,13 @@ async function updateEssay(essay) {
             slug = $2,
             title = $3,
             author_id = $4,
-            summary = $5,
-            body = $6,
-            cover_media_id = $7,
-            status = $8,
-            published_at = $9,
-            updated_at = $10
+            kind = $5,
+            summary = $6,
+            body = $7,
+            cover_media_id = $8,
+            status = $9,
+            published_at = $10,
+            updated_at = $11
           WHERE id = $1
         `,
         [
@@ -1367,6 +1485,7 @@ async function updateEssay(essay) {
           essay.slug,
           essay.title,
           authorId,
+          essay.kind || "commentary",
           essay.summary || "",
           essay.body || "",
           mediaAssetId,
@@ -1503,6 +1622,46 @@ async function assignImagesIfMissing(postImageMap = {}) {
   });
 }
 
+async function backfillCreatedByUserIfMissing(username = "") {
+  await init();
+
+  const normalizedUsername = String(username || "").trim();
+  if (!normalizedUsername) {
+    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0 };
+  }
+
+  const user = await getUserByUsername(normalizedUsername);
+  if (!user) {
+    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0 };
+  }
+
+  const poemsResult = await pool.query(
+    `
+      UPDATE poems
+      SET created_by_user_id = $1
+      WHERE created_by_user_id IS NULL
+    `,
+    [user.id]
+  );
+
+  const essaysResult = await pool.query(
+    `
+      UPDATE essays
+      SET created_by_user_id = $1
+      WHERE created_by_user_id IS NULL
+    `,
+    [user.id]
+  );
+
+  return {
+    userFound: true,
+    poemsUpdated: poemsResult.rowCount || 0,
+    essaysUpdated: essaysResult.rowCount || 0,
+    userId: user.id,
+    username: user.username,
+  };
+}
+
 async function close() {
   await pool.end();
 }
@@ -1542,4 +1701,5 @@ module.exports = {
   seedPostsIfMissing,
   seedEssaysIfEmpty,
   assignImagesIfMissing,
+  backfillCreatedByUserIfMissing,
 };
