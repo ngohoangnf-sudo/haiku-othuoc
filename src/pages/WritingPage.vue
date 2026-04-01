@@ -793,10 +793,10 @@ export default defineComponent({
         : `${formatPageNumber(previewEssaysPage.value)} / ${formatPageNumber(previewEssaysTotalPages.value)}`
     );
     const essayPreviewHeading = computed(() =>
-      isSubmissionComposer.value ? "Bài gửi chờ duyệt" : "Nghiên cứu và bình luận"
+      isSubmissionReviewTab.value ? "Bài gửi chờ duyệt" : "Nghiên cứu và bình luận"
     );
     const essayPreviewEmptyMessage = computed(() =>
-      isSubmissionComposer.value
+      isSubmissionReviewTab.value
         ? "Chưa có bài gửi chờ duyệt."
         : "Không tìm thấy nội dung phù hợp trong mục Nghĩ."
     );

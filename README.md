@@ -235,6 +235,55 @@ Attach a static IP and open ports:
 
 Do not expose PostgreSQL publicly.
 
+### Automated database backup
+
+If you want daily PostgreSQL backups from the production server into the same S3 bucket that serves the frontend, do not upload into the bucket root. Use a separate prefix such as:
+
+```bash
+ops/db-backups/
+```
+
+This repo now includes:
+
+- [scripts/backup_prod_db_to_s3.sh](/Users/nguoididay/Projects/Personal%20projects/haiku/scripts/backup_prod_db_to_s3.sh)
+- [scripts/install_prod_db_backup_cron.sh](/Users/nguoididay/Projects/Personal%20projects/haiku/scripts/install_prod_db_backup_cron.sh)
+
+Required environment variables on the production server:
+
+```bash
+DB_BACKUP_S3_BUCKET=YOUR_FRONTEND_BUCKET
+DB_BACKUP_S3_PREFIX=ops/db-backups
+DB_BACKUP_LOCAL_DIR=/tmp/haiku-db-backups
+DB_BACKUP_KEEP_LOCAL=false
+DB_BACKUP_CRON_TZ=Asia/Ho_Chi_Minh
+```
+
+The backup script:
+
+- loads env from `.env` by default
+- creates a `pg_dump -Fc` backup
+- uploads it to `s3://$DB_BACKUP_S3_BUCKET/$DB_BACKUP_S3_PREFIX/YYYY/MM/...`
+- removes the local dump after upload unless `DB_BACKUP_KEEP_LOCAL=true`
+
+To install the daily `00:00 Asia/Ho_Chi_Minh` cron job on the server:
+
+```bash
+chmod +x scripts/backup_prod_db_to_s3.sh scripts/install_prod_db_backup_cron.sh
+./scripts/install_prod_db_backup_cron.sh
+```
+
+The installer writes this kind of cron entry:
+
+```bash
+0 0 * * * TZ=Asia/Ho_Chi_Minh ENV_FILE="/path/to/app/.env" /usr/bin/env bash "/path/to/app/scripts/backup_prod_db_to_s3.sh" >> "/path/to/app/logs/db-backup.log" 2>&1
+```
+
+You can test the backup manually before trusting cron:
+
+```bash
+ENV_FILE=/path/to/app/.env ./scripts/backup_prod_db_to_s3.sh
+```
+
 ### SSH
 
 Typical SSH command:
