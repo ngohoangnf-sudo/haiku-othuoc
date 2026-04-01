@@ -50,6 +50,8 @@ function mapPoemRow(row) {
     title: row.title || "",
     author: row.author,
     authorSlug: row.authorSlug,
+    pendingAuthorName: row.pendingAuthorName || "",
+    pendingAuthorSlug: row.pendingAuthorSlug || "",
     category: row.category,
     lines: Array.isArray(row.lines) ? row.lines : [],
     summary: row.summary || "",
@@ -76,6 +78,8 @@ function mapEssayRow(row) {
     kind: row.kind || "commentary",
     author: row.author || "",
     authorSlug: row.authorSlug || "",
+    pendingAuthorName: row.pendingAuthorName || "",
+    pendingAuthorSlug: row.pendingAuthorSlug || "",
     summary: row.summary || "",
     body: row.body || "",
     image: row.image || "",
@@ -163,8 +167,28 @@ async function init() {
       ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
     `);
     await pool.query(`
+      ALTER TABLE poems
+      ALTER COLUMN author_id DROP NOT NULL
+    `);
+    await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS pending_author_name TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS pending_author_slug TEXT
+    `);
+    await pool.query(`
       ALTER TABLE essays
       ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS pending_author_name TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS pending_author_slug TEXT
     `);
     await pool.query(`
       ALTER TABLE essays
@@ -223,12 +247,55 @@ async function ensureAuthor(client, { author, authorSlug }) {
   return result.rows[0].id;
 }
 
-async function ensureAuthorIfPresent(client, { author, authorSlug }) {
-  if (!author || !authorSlug) {
+async function findAuthorIdBySlug(client, authorSlug) {
+  if (!authorSlug) {
     return null;
   }
 
-  return ensureAuthor(client, { author, authorSlug });
+  const result = await client.query("SELECT id FROM authors WHERE slug = $1 LIMIT 1", [authorSlug]);
+  return result.rowCount ? result.rows[0].id : null;
+}
+
+async function resolveAuthorReference(client, { author, authorSlug, allowCreate = false }) {
+  const normalizedAuthor = typeof author === "string" ? author.trim() : "";
+  const normalizedAuthorSlug =
+    typeof authorSlug === "string" && authorSlug.trim()
+      ? authorSlug.trim()
+      : slugify(normalizedAuthor);
+
+  if (!normalizedAuthor && !normalizedAuthorSlug) {
+    return {
+      authorId: null,
+      pendingAuthorName: null,
+      pendingAuthorSlug: null,
+    };
+  }
+
+  const existingAuthorId = await findAuthorIdBySlug(client, normalizedAuthorSlug);
+  if (existingAuthorId) {
+    return {
+      authorId: existingAuthorId,
+      pendingAuthorName: null,
+      pendingAuthorSlug: null,
+    };
+  }
+
+  if (allowCreate && normalizedAuthor && normalizedAuthorSlug) {
+    return {
+      authorId: await ensureAuthor(client, {
+        author: normalizedAuthor,
+        authorSlug: normalizedAuthorSlug,
+      }),
+      pendingAuthorName: null,
+      pendingAuthorSlug: null,
+    };
+  }
+
+  return {
+    authorId: null,
+    pendingAuthorName: normalizedAuthor || null,
+    pendingAuthorSlug: normalizedAuthorSlug || null,
+  };
 }
 
 async function ensureMediaAsset(client, source, existingMediaAssetId = null) {
@@ -672,7 +739,7 @@ async function getAllPosts(filters = {}) {
 
   if (filters.authorSlug) {
     values.push(filters.authorSlug);
-    clauses.push(`a.slug = $${values.length}`);
+    clauses.push(`COALESCE(a.slug, e.pending_author_slug) = $${values.length}`);
   }
 
   if (filters.search) {
@@ -680,7 +747,7 @@ async function getAllPosts(filters = {}) {
     clauses.push(`(
       p.title ILIKE $${values.length}
       OR p.summary ILIKE $${values.length}
-      OR a.display_name ILIKE $${values.length}
+      OR COALESCE(a.display_name, p.pending_author_name, '') ILIKE $${values.length}
       OR EXISTS (
         SELECT 1
         FROM poem_lines pl_search
@@ -709,8 +776,10 @@ async function getAllPosts(filters = {}) {
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, p.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        p.pending_author_name AS "pendingAuthorName",
+        p.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -720,7 +789,7 @@ async function getAllPosts(filters = {}) {
           '[]'::json
         ) AS lines
       FROM poems p
-      JOIN authors a ON a.id = p.author_id
+      LEFT JOIN authors a ON a.id = p.author_id
       LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
@@ -747,7 +816,7 @@ async function getPagedPosts(filters = {}, pagination = {}) {
 
   if (filters.authorSlug) {
     values.push(filters.authorSlug);
-    clauses.push(`a.slug = $${values.length}`);
+    clauses.push(`COALESCE(a.slug, p.pending_author_slug) = $${values.length}`);
   }
 
   if (filters.search) {
@@ -755,7 +824,7 @@ async function getPagedPosts(filters = {}, pagination = {}) {
     clauses.push(`(
       p.title ILIKE $${values.length}
       OR p.summary ILIKE $${values.length}
-      OR a.display_name ILIKE $${values.length}
+      OR COALESCE(a.display_name, p.pending_author_name, '') ILIKE $${values.length}
       OR EXISTS (
         SELECT 1
         FROM poem_lines pl_search
@@ -779,7 +848,7 @@ async function getPagedPosts(filters = {}, pagination = {}) {
     `
       SELECT COUNT(*)::int AS total
       FROM poems p
-      JOIN authors a ON a.id = p.author_id
+      LEFT JOIN authors a ON a.id = p.author_id
       ${where}
     `,
     values
@@ -810,8 +879,10 @@ async function getPagedPosts(filters = {}, pagination = {}) {
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, p.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        p.pending_author_name AS "pendingAuthorName",
+        p.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -821,7 +892,7 @@ async function getPagedPosts(filters = {}, pagination = {}) {
           '[]'::json
         ) AS lines
       FROM poems p
-      JOIN authors a ON a.id = p.author_id
+      LEFT JOIN authors a ON a.id = p.author_id
       LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
@@ -866,8 +937,10 @@ async function getPostById(id, options = { status: null }) {
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, p.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        p.pending_author_name AS "pendingAuthorName",
+        p.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -877,7 +950,7 @@ async function getPostById(id, options = { status: null }) {
           '[]'::json
         ) AS lines
       FROM poems p
-      JOIN authors a ON a.id = p.author_id
+      LEFT JOIN authors a ON a.id = p.author_id
       LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
@@ -973,7 +1046,7 @@ async function getAllEssays(filters = {}) {
       e.title ILIKE $${values.length}
       OR e.summary ILIKE $${values.length}
       OR e.body ILIKE $${values.length}
-      OR COALESCE(a.display_name, '') ILIKE $${values.length}
+      OR COALESCE(a.display_name, e.pending_author_name, '') ILIKE $${values.length}
       OR EXISTS (
         SELECT 1
         FROM essay_tag_links etl_search
@@ -998,13 +1071,15 @@ async function getAllEssays(filters = {}) {
         e.kind,
         e.summary,
         e.body,
-        e.status,
-        e.published_at AS "publishedAt",
-        e.created_at AS "createdAt",
-        e.updated_at AS "updatedAt",
-        a.display_name AS author,
-        a.slug AS "authorSlug",
-        u.id AS "postedById",
+      e.status,
+      e.published_at AS "publishedAt",
+      e.created_at AS "createdAt",
+      e.updated_at AS "updatedAt",
+      COALESCE(a.display_name, e.pending_author_name, '') AS author,
+      a.slug AS "authorSlug",
+      e.pending_author_name AS "pendingAuthorName",
+      e.pending_author_slug AS "pendingAuthorSlug",
+      u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
         COALESCE(m.source, '') AS image,
@@ -1038,7 +1113,7 @@ async function getPagedEssays(filters = {}, pagination = {}) {
 
   if (filters.authorSlug) {
     values.push(filters.authorSlug);
-    clauses.push(`a.slug = $${values.length}`);
+    clauses.push(`COALESCE(a.slug, e.pending_author_slug) = $${values.length}`);
   }
 
   if (filters.kind) {
@@ -1072,7 +1147,7 @@ async function getPagedEssays(filters = {}, pagination = {}) {
       e.title ILIKE $${values.length}
       OR e.summary ILIKE $${values.length}
       OR e.body ILIKE $${values.length}
-      OR COALESCE(a.display_name, '') ILIKE $${values.length}
+      OR COALESCE(a.display_name, e.pending_author_name, '') ILIKE $${values.length}
       OR EXISTS (
         SELECT 1
         FROM essay_tag_links etl_search
@@ -1118,8 +1193,10 @@ async function getPagedEssays(filters = {}, pagination = {}) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        e.pending_author_name AS "pendingAuthorName",
+        e.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -1215,8 +1292,10 @@ async function getEssayById(id) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        e.pending_author_name AS "pendingAuthorName",
+        e.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -1266,8 +1345,10 @@ async function getEssayBySlug(slug, options = {}) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
-        a.display_name AS author,
+        COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
+        e.pending_author_name AS "pendingAuthorName",
+        e.pending_author_slug AS "pendingAuthorSlug",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -1298,9 +1379,10 @@ async function insertPost(post) {
     await client.query("BEGIN");
 
     try {
-      const authorId = await ensureAuthor(client, {
+      const authorReference = await resolveAuthorReference(client, {
         author: post.author,
         authorSlug: post.authorSlug,
+        allowCreate: post.status !== "submitted",
       });
       const mediaAssetId = await ensureMediaAsset(client, post.image);
 
@@ -1311,6 +1393,8 @@ async function insertPost(post) {
             slug,
             title,
             author_id,
+            pending_author_name,
+            pending_author_slug,
             created_by_user_id,
             category,
             summary,
@@ -1320,13 +1404,15 @@ async function insertPost(post) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         `,
         [
           post.id,
           post.slug || null,
           post.title || "",
-          authorId,
+          authorReference.authorId,
+          authorReference.pendingAuthorName,
+          authorReference.pendingAuthorSlug,
           post.createdByUserId || null,
           post.category,
           post.summary || "",
@@ -1364,9 +1450,10 @@ async function updatePost(post) {
         return null;
       }
 
-      const authorId = await ensureAuthor(client, {
+      const authorReference = await resolveAuthorReference(client, {
         author: post.author,
         authorSlug: post.authorSlug,
+        allowCreate: post.status !== "submitted",
       });
       const mediaAssetId = await ensureMediaAsset(
         client,
@@ -1381,19 +1468,23 @@ async function updatePost(post) {
             slug = $2,
             title = $3,
             author_id = $4,
-            category = $5,
-            summary = $6,
-            media_asset_id = $7,
-            status = $8,
-            published_at = $9,
-            updated_at = $10
+            pending_author_name = $5,
+            pending_author_slug = $6,
+            category = $7,
+            summary = $8,
+            media_asset_id = $9,
+            status = $10,
+            published_at = $11,
+            updated_at = $12
           WHERE id = $1
         `,
         [
           post.id,
           post.slug || null,
           post.title || "",
-          authorId,
+          authorReference.authorId,
+          authorReference.pendingAuthorName,
+          authorReference.pendingAuthorSlug,
           post.category,
           post.summary || "",
           mediaAssetId,
@@ -1419,9 +1510,10 @@ async function insertEssay(essay) {
     await client.query("BEGIN");
 
     try {
-      const authorId = await ensureAuthorIfPresent(client, {
+      const authorReference = await resolveAuthorReference(client, {
         author: essay.author,
         authorSlug: essay.authorSlug,
+        allowCreate: essay.status !== "submitted",
       });
       const mediaAssetId = await ensureMediaAsset(client, essay.image);
 
@@ -1432,6 +1524,8 @@ async function insertEssay(essay) {
             slug,
             title,
             author_id,
+            pending_author_name,
+            pending_author_slug,
             created_by_user_id,
             kind,
             summary,
@@ -1442,13 +1536,15 @@ async function insertEssay(essay) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
         `,
         [
           essay.id,
           essay.slug,
           essay.title,
-          authorId,
+          authorReference.authorId,
+          authorReference.pendingAuthorName,
+          authorReference.pendingAuthorSlug,
           essay.createdByUserId || null,
           essay.kind || "commentary",
           essay.summary || "",
@@ -1493,9 +1589,10 @@ async function updateEssay(essay) {
         return null;
       }
 
-      const authorId = await ensureAuthorIfPresent(client, {
+      const authorReference = await resolveAuthorReference(client, {
         author: essay.author,
         authorSlug: essay.authorSlug,
+        allowCreate: essay.status !== "submitted",
       });
       const mediaAssetId = await ensureMediaAsset(
         client,
@@ -1510,20 +1607,24 @@ async function updateEssay(essay) {
             slug = $2,
             title = $3,
             author_id = $4,
-            kind = $5,
-            summary = $6,
-            body = $7,
-            cover_media_id = $8,
-            status = $9,
-            published_at = $10,
-            updated_at = $11
+            pending_author_name = $5,
+            pending_author_slug = $6,
+            kind = $7,
+            summary = $8,
+            body = $9,
+            cover_media_id = $10,
+            status = $11,
+            published_at = $12,
+            updated_at = $13
           WHERE id = $1
         `,
         [
           essay.id,
           essay.slug,
           essay.title,
-          authorId,
+          authorReference.authorId,
+          authorReference.pendingAuthorName,
+          authorReference.pendingAuthorSlug,
           essay.kind || "commentary",
           essay.summary || "",
           essay.body || "",
@@ -1568,6 +1669,7 @@ async function getAuthors() {
         COUNT(p.id)::int AS total
       FROM authors a
       JOIN poems p ON p.author_id = a.id
+      WHERE p.status = 'published'
       GROUP BY a.id
       ORDER BY total DESC, latest DESC
     `
