@@ -214,7 +214,7 @@ Then invalidate CloudFront:
 
 ```bash
 aws cloudfront create-invalidation \
-  --distribution-id YOUR_FRONTEND_DISTRIBUTION_ID \
+  --distribution-id EP23DSG9TP2CV \
   --paths "/*"
 ```
 
@@ -385,6 +385,7 @@ S3_UPLOAD_REGION=ap-southeast-1
 S3_UPLOAD_PREFIX=haiku-image
 MEDIA_PUBLIC_BASE=https://media.othuoc.space
 MEDIA_UPLOAD_MAX_MB=5
+ENABLE_CONTENT_SEED=false
 
 BOOTSTRAP_ADMIN_USERNAME=admin
 BOOTSTRAP_ADMIN_PASSWORD=VERY_STRONG_PASSWORD
@@ -468,15 +469,26 @@ pg_restore --clean --if-exists --no-owner \
 
 ### Seed behavior
 
-The backend currently contains hardcoded seed content in [server/index.js](/Users/nguoididay/Projects/Personal%20projects/haiku/server/index.js#L765).
+The backend contains hardcoded seed content in [server/index.js](/Users/nguoididay/Projects/Personal%20projects/haiku/server/index.js).
 
-On startup, the API runs:
+Seed execution is now controlled by `ENABLE_CONTENT_SEED`:
+
+- local/dev default: `true`
+- production default: `false`
+
+When `ENABLE_CONTENT_SEED=true`, startup runs:
 
 - `seedIfEmpty(seededPosts)`
 - `seedPostsIfMissing(supplementalJapaneseSeedPosts)`
 - `seedEssaysIfEmpty(SEED_ESSAYS)`
 
-This means a brand new production database will show seed poems and essays before the local database is restored.
+Recommended production setting:
+
+```bash
+ENABLE_CONTENT_SEED=false
+```
+
+With that setting, restarting the production API will not insert seed poems or essays into the database.
 
 ### Media migration
 

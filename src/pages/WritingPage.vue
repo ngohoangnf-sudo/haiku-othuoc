@@ -1142,6 +1142,23 @@ export default defineComponent({
       });
     };
 
+    const resetPreviewData = (type) => {
+      if (type === "essay") {
+        previewEssays.value = [];
+        previewEssaysTotal.value = 0;
+        previewEssaysTotalPages.value = 1;
+        previewEssaysPage.value = 1;
+        essayPreviewActiveIndex.value = 0;
+        return;
+      }
+
+      previewPosts.value = [];
+      previewPostsTotal.value = 0;
+      previewPostsTotalPages.value = 1;
+      previewPostsPage.value = 1;
+      poemPreviewActiveIndex.value = 0;
+    };
+
     async function loadPostPreviews(page = previewPostsPage.value, { append = false } = {}) {
       previewPostsLoading.value = true;
       previewError.value = "";
@@ -1728,6 +1745,7 @@ export default defineComponent({
     });
 
     watch(poemPreviewStatus, () => {
+      resetPreviewData("poem");
       transitionPostPreviews(1);
     });
 
@@ -1736,10 +1754,12 @@ export default defineComponent({
     });
 
     watch(essayPreviewStatus, () => {
+      resetPreviewData("essay");
       transitionEssayPreviews(1);
     });
 
     watch(essayPreviewKind, () => {
+      resetPreviewData("essay");
       transitionEssayPreviews(1);
     });
 

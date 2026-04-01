@@ -41,6 +41,11 @@
         isPoemVisible(poem.id) ? 'reading-page__item--visible' : ''
       ]"
       :style="itemGridStyle(index)"
+      tabindex="0"
+      role="link"
+      @click="openPoemDetail(poem, $event)"
+      @keydown.enter.prevent="openPoemDetail(poem, $event)"
+      @keydown.space.prevent="openPoemDetail(poem, $event)"
     >
       <h3 v-if="poem.title" class="content__item-title content__item-title--layer reading-page__title">{{ poem.title }}</h3>
       <div
@@ -85,7 +90,7 @@
 
 <script>
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { initHoverImageEffects } from "assets/hover_image_effect.js";
 import { resolveMediaUrl } from "src/utils/runtime";
@@ -94,6 +99,7 @@ export default defineComponent({
   name: "ReadingPage",
   setup() {
     const route = useRoute();
+    const router = useRouter();
     const poemItems = ref([]);
     const poemEffectWrappers = ref([]);
     const poemLoadMoreTrigger = ref(null);
@@ -144,6 +150,19 @@ export default defineComponent({
     };
 
     const isPoemVisible = (id) => visiblePoems.value.has(poemVisibilityKey(id));
+
+    const shouldIgnorePoemOpen = (event) => {
+      const target = event?.target;
+      return Boolean(target?.closest?.("a, button, input, textarea, select, label"));
+    };
+
+    const openPoemDetail = (poem, event) => {
+      if (!poem?.id || shouldIgnorePoemOpen(event)) {
+        return;
+      }
+
+      router.push(`/post/${poem.id}`);
+    };
 
     const destroyPoemRevealObserver = () => {
       if (poemRevealObserver) {
@@ -412,6 +431,7 @@ export default defineComponent({
       poemLoadMoreTrigger,
       hasMorePoems,
       isPoemVisible,
+      openPoemDetail,
     };
   },
 });
@@ -520,6 +540,15 @@ export default defineComponent({
   transition:
     opacity 1500ms cubic-bezier(0.16, 1, 0.3, 1),
     transform 1500ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.reading-page__item {
+  cursor: pointer;
+}
+
+.reading-page__item:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: 0.6rem;
 }
 
 .reading-page__item--visible {

@@ -22,6 +22,10 @@ const mediaRoutePrefix = normalizeRoutePrefix(process.env.MEDIA_ROUTE_PREFIX || 
 const localMediaRoot = path.resolve(__dirname, "..", "src", "assets");
 const SESSION_TTL_MS = resolveSessionTtlMs(process.env.SESSION_TTL_DAYS);
 const isProduction = process.env.NODE_ENV === "production";
+const ENABLE_CONTENT_SEED = resolveBooleanEnv(
+  process.env.ENABLE_CONTENT_SEED,
+  !isProduction
+);
 const LEGACY_CONTENT_USERNAME = process.env.LEGACY_CONTENT_USERNAME || "ngohoang";
 const S3_UPLOAD_BUCKET = String(process.env.S3_UPLOAD_BUCKET || "").trim();
 const S3_UPLOAD_REGION = String(process.env.S3_UPLOAD_REGION || process.env.AWS_REGION || "").trim();
@@ -1504,10 +1508,14 @@ if (fs.existsSync(SPA_DIST)) {
 async function startServer() {
   await db.init();
   await ensureBootstrapAdmin();
-  await db.seedIfEmpty(seededPosts);
-  await db.seedPostsIfMissing(supplementalJapaneseSeedPosts);
-  await db.seedEssaysIfEmpty(SEED_ESSAYS);
-  await db.assignImagesIfMissing(seededVietnameseImageMap);
+  if (ENABLE_CONTENT_SEED) {
+    await db.seedIfEmpty(seededPosts);
+    await db.seedPostsIfMissing(supplementalJapaneseSeedPosts);
+    await db.seedEssaysIfEmpty(SEED_ESSAYS);
+    await db.assignImagesIfMissing(seededVietnameseImageMap);
+  } else {
+    console.log("Bo qua content seed theo cau hinh ENABLE_CONTENT_SEED.");
+  }
   const legacyBackfill = await db.backfillCreatedByUserIfMissing(LEGACY_CONTENT_USERNAME);
 
   if (legacyBackfill.userFound && (legacyBackfill.poemsUpdated || legacyBackfill.essaysUpdated)) {
@@ -1631,6 +1639,27 @@ function resolveMediaUploadMaxBytes(value) {
   const mb = Number(value || 5);
   const safeMb = Number.isFinite(mb) && mb > 0 ? mb : 5;
   return safeMb * 1024 * 1024;
+}
+
+function resolveBooleanEnv(value, fallback = false) {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  switch (value.trim().toLowerCase()) {
+    case "1":
+    case "true":
+    case "yes":
+    case "on":
+      return true;
+    case "0":
+    case "false":
+    case "no":
+    case "off":
+      return false;
+    default:
+      return fallback;
+  }
 }
 
 function normalizeMediaUploadScope(value = "") {
