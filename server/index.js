@@ -33,6 +33,9 @@ const S3_UPLOAD_PREFIX = normalizeObjectKeyPrefix(process.env.S3_UPLOAD_PREFIX |
 const MEDIA_PUBLIC_BASE = normalizeBaseUrl(process.env.MEDIA_PUBLIC_BASE || "");
 const MEDIA_UPLOAD_MAX_BYTES = resolveMediaUploadMaxBytes(process.env.MEDIA_UPLOAD_MAX_MB);
 const MEDIA_UPLOAD_URL_TTL_SECONDS = 15 * 60;
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const SUBMISSION_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+const MEDIA_PRESIGN_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const DEFAULT_BOOTSTRAP_ADMIN = {
   username: process.env.BOOTSTRAP_ADMIN_USERNAME || "admin",
   password:
@@ -40,11 +43,40 @@ const DEFAULT_BOOTSTRAP_ADMIN = {
   displayName: process.env.BOOTSTRAP_ADMIN_DISPLAY_NAME || "Administrator",
 };
 let s3UploadClient = null;
+const rateLimitStore = new Map();
 const corsOrigins = String(process.env.CORS_ORIGIN || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
 const app = express();
+
+const loginRateLimit = createRateLimiter({
+  namespace: "auth-login",
+  windowMs: LOGIN_RATE_LIMIT_WINDOW_MS,
+  max: 10,
+  message: "Bạn đã thử đăng nhập quá nhiều lần. Hãy thử lại sau ít phút.",
+  keyFn: (req) => {
+    const username =
+      typeof req.body?.username === "string" ? req.body.username.trim().toLowerCase() : "";
+    return `${getRequestIp(req)}:${username || "*"}`;
+  },
+});
+
+const submissionRateLimit = createRateLimiter({
+  namespace: "content-submission",
+  windowMs: SUBMISSION_RATE_LIMIT_WINDOW_MS,
+  max: 20,
+  message: "Bạn đã gửi quá nhiều bài trong một giờ. Hãy thử lại sau.",
+  keyFn: (req) => req.auth?.user?.id || req.auth?.sessionId || getRequestIp(req),
+});
+
+const mediaPresignRateLimit = createRateLimiter({
+  namespace: "media-presign",
+  windowMs: MEDIA_PRESIGN_RATE_LIMIT_WINDOW_MS,
+  max: 40,
+  message: "Bạn đã yêu cầu upload ảnh quá nhiều lần. Hãy thử lại sau.",
+  keyFn: (req) => req.auth?.user?.id || req.auth?.sessionId || getRequestIp(req),
+});
 
 app.set("trust proxy", true);
 app.use(
@@ -123,7 +155,7 @@ app.get("/api/auth/session", (req, res) => {
   });
 });
 
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", loginRateLimit, async (req, res) => {
   try {
     const username = typeof req.body?.username === "string" ? req.body.username.trim() : "";
     const password = typeof req.body?.password === "string" ? req.body.password : "";
@@ -275,7 +307,7 @@ app.get("/api/me/activity", requireEditor, async (req, res) => {
   }
 });
 
-app.post("/api/media/presign", async (req, res) => {
+app.post("/api/media/presign", mediaPresignRateLimit, async (req, res) => {
   try {
     if (!S3_UPLOAD_BUCKET || !S3_UPLOAD_REGION || !MEDIA_PUBLIC_BASE) {
       return res.status(503).json({
@@ -511,7 +543,7 @@ app.get("/api/posts/:id", async (req, res) => {
   }
 });
 
-app.post("/api/posts", async (req, res) => {
+app.post("/api/posts", submissionRateLimit, async (req, res) => {
   try {
     const input = req.body || {};
     const lines = Array.isArray(input.lines)
@@ -533,6 +565,9 @@ app.post("/api/posts", async (req, res) => {
       author: input.author || "Vô danh",
       authorSlug: input.authorSlug || slugify(input.author || "vo-danh"),
       createdByUserId: canManagePosts ? req.auth.user.id : null,
+      submittedBySessionId: !canManagePosts ? req.auth.sessionId || null : null,
+      submittedIpAddress: !canManagePosts ? getRequestIp(req) : null,
+      submittedUserAgent: !canManagePosts ? getUserAgent(req) : null,
       category: input.category || "vi",
       lines,
       summary: input.summary || "",
@@ -723,7 +758,7 @@ app.get("/api/essays/:slug", async (req, res) => {
   }
 });
 
-app.post("/api/essays", async (req, res) => {
+app.post("/api/essays", submissionRateLimit, async (req, res) => {
   try {
     const input = req.body || {};
     const title = typeof input.title === "string" ? input.title.trim() : "";
@@ -749,6 +784,9 @@ app.post("/api/essays", async (req, res) => {
       author: typeof input.author === "string" ? input.author.trim() : "",
       authorSlug: resolveAuthorSlug(input.authorSlug, input.author),
       createdByUserId: canManageEssays ? req.auth.user.id : null,
+      submittedBySessionId: !canManageEssays ? req.auth.sessionId || null : null,
+      submittedIpAddress: !canManageEssays ? getRequestIp(req) : null,
+      submittedUserAgent: !canManageEssays ? getUserAgent(req) : null,
       kind: input.kind === "research" ? "research" : "commentary",
       summary: typeof input.summary === "string" ? input.summary.trim() : "",
       body,
@@ -1858,6 +1896,39 @@ function getRequestIp(req) {
 
 function getUserAgent(req) {
   return String(req.headers["user-agent"] || "");
+}
+
+function createRateLimiter({ namespace, windowMs, max, message, keyFn }) {
+  const safeWindowMs = Math.max(1000, Number(windowMs) || 60 * 1000);
+  const safeMax = Math.max(1, Number(max) || 1);
+
+  return (req, res, next) => {
+    const now = Date.now();
+    const rawKey = typeof keyFn === "function" ? keyFn(req) : "";
+    const scopedKey = `${namespace}:${String(rawKey || "anonymous")}`;
+    const current = rateLimitStore.get(scopedKey);
+
+    if (!current || current.resetAt <= now) {
+      rateLimitStore.set(scopedKey, {
+        count: 1,
+        resetAt: now + safeWindowMs,
+      });
+      return next();
+    }
+
+    current.count += 1;
+
+    if (current.count > safeMax) {
+      const retryAfterSeconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+      res.setHeader("Retry-After", retryAfterSeconds);
+      return res.status(429).json({
+        message,
+        retryAfterSeconds,
+      });
+    }
+
+    return next();
+  };
 }
 
 async function logActivity(req, entry) {

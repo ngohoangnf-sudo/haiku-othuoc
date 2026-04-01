@@ -179,6 +179,18 @@ async function init() {
       ADD COLUMN IF NOT EXISTS pending_author_slug TEXT
     `);
     await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS submitted_by_session_id TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS submitted_ip_address TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE poems
+      ADD COLUMN IF NOT EXISTS submitted_user_agent TEXT
+    `);
+    await pool.query(`
       ALTER TABLE essays
       ADD COLUMN IF NOT EXISTS created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL
     `);
@@ -189,6 +201,18 @@ async function init() {
     await pool.query(`
       ALTER TABLE essays
       ADD COLUMN IF NOT EXISTS pending_author_slug TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS submitted_by_session_id TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS submitted_ip_address TEXT
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS submitted_user_agent TEXT
     `);
     await pool.query(`
       ALTER TABLE essays
@@ -1396,6 +1420,9 @@ async function insertPost(post) {
             pending_author_name,
             pending_author_slug,
             created_by_user_id,
+            submitted_by_session_id,
+            submitted_ip_address,
+            submitted_user_agent,
             category,
             summary,
             media_asset_id,
@@ -1404,7 +1431,7 @@ async function insertPost(post) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
         `,
         [
           post.id,
@@ -1414,6 +1441,9 @@ async function insertPost(post) {
           authorReference.pendingAuthorName,
           authorReference.pendingAuthorSlug,
           post.createdByUserId || null,
+          post.submittedBySessionId || null,
+          post.submittedIpAddress || null,
+          post.submittedUserAgent || null,
           post.category,
           post.summary || "",
           mediaAssetId,
@@ -1527,6 +1557,9 @@ async function insertEssay(essay) {
             pending_author_name,
             pending_author_slug,
             created_by_user_id,
+            submitted_by_session_id,
+            submitted_ip_address,
+            submitted_user_agent,
             kind,
             summary,
             body,
@@ -1536,7 +1569,7 @@ async function insertEssay(essay) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
         `,
         [
           essay.id,
@@ -1546,6 +1579,9 @@ async function insertEssay(essay) {
           authorReference.pendingAuthorName,
           authorReference.pendingAuthorSlug,
           essay.createdByUserId || null,
+          essay.submittedBySessionId || null,
+          essay.submittedIpAddress || null,
+          essay.submittedUserAgent || null,
           essay.kind || "commentary",
           essay.summary || "",
           essay.body || "",
