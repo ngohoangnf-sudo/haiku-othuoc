@@ -12,8 +12,8 @@ export async function initLiquidInkBackground({
   mount,
   prefersReducedMotion = false,
 } = {}) {
-  const pixelRatioCap = 1;
-  const targetFps = 24;
+  const pixelRatioCap = 0.9;
+  const targetFps = 18;
   const frameInterval = 1000 / targetFps;
 
   if (!mount || typeof window === "undefined" || prefersReducedMotion) {
@@ -28,7 +28,7 @@ export async function initLiquidInkBackground({
   const THREE = await loadThree();
 
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    antialias: false,
     alpha: true,
   });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
@@ -136,23 +136,6 @@ export async function initLiquidInkBackground({
         return 1.0 - smoothstep(width, width + 0.08, line);
       }
 
-      float paperHeightField(vec2 pos) {
-        vec2 paperPoint = rotate2D(-0.18) * pos * vec2(1.0, 1.12);
-        vec2 paperFlow = warp(paperPoint * 0.32, 0.64);
-        vec2 paperField = paperPoint + paperFlow * 0.08;
-
-        float drift = fbm(
-          paperField * 0.42 + vec2(uTime * 0.0011, -uTime * 0.0009)
-        );
-        float wrinkleA =
-          sin(paperField.y * 6.2 + sin(paperField.x * 1.18 + paperFlow.x * 0.42) * 0.92) * 0.5 + 0.5;
-        float wrinkleB =
-          sin(paperField.y * 3.7 - 0.7 + sin(paperField.x * 0.84 - paperFlow.y * 0.3) * 0.66) * 0.5 + 0.5;
-        float body = smoothstep(0.08, 0.94, wrinkleA * 0.72 + wrinkleB * 0.28);
-
-        return body * 0.86 + drift * 0.14;
-      }
-
       void main() {
         vec2 uv = vUv;
         vec2 aspect = vec2(uResolution.x / max(uResolution.y, 1.0), 1.0);
@@ -199,13 +182,9 @@ export async function initLiquidInkBackground({
         float paperBody = smoothstep(0.08, 0.94, paperWrinkleA * 0.72 + paperWrinkleB * 0.28);
         float paperRidge =
           contourLine((paperField.y + paperDrift * 0.08) * 6.2 + paperTexture * 0.28, 0.24) * 0.08;
-        float paperHeight = paperHeightField(centered);
-        float paperHeightDx = paperHeightField(centered + vec2(0.02, 0.0)) - paperHeight;
-        float paperHeightDy = paperHeightField(centered + vec2(0.0, 0.02)) - paperHeight;
-        vec3 paperNormal = normalize(vec3(-paperHeightDx * 7.2, -paperHeightDy * 7.2, 1.0));
-        vec3 paperLightDir = normalize(vec3(-0.34, 0.48, 0.8));
-        float paperLight = clamp(dot(paperNormal, paperLightDir), 0.0, 1.0);
-        float paperOcclusion = clamp((1.0 - paperLight) * 0.54, 0.0, 1.0);
+        float paperRelief = clamp(paperBody * 0.78 + paperDrift * 0.22, 0.0, 1.0);
+        float paperLight = clamp(0.56 + paperWrinkleA * 0.18 - paperWrinkleB * 0.1 + paperDrift * 0.12, 0.0, 1.0);
+        float paperOcclusion = clamp((1.0 - paperRelief) * 0.22 + paperFiber * 0.06, 0.0, 1.0);
 
         float paperShimmer = smoothstep(
           0.24,
@@ -252,12 +231,12 @@ export async function initLiquidInkBackground({
         vec3 paperColor = mix(
           paperBaseColor,
           paperMidColor,
-          clamp(paperHeight * 0.68 + paperTexture * 0.12, 0.0, 1.0)
+          clamp(paperRelief * 0.66 + paperTexture * 0.12, 0.0, 1.0)
         );
         paperColor = mix(
           paperColor,
           paperShadowColor,
-          clamp(paperOcclusion * 0.7 + (1.0 - paperHeight) * 0.04, 0.0, 1.0)
+          clamp(paperOcclusion * 0.7 + (1.0 - paperRelief) * 0.05, 0.0, 1.0)
         );
         paperColor *= mix(0.92, 1.03, paperLight);
         paperColor += paperHighlightColor * paperRidge * 0.14;
@@ -265,7 +244,7 @@ export async function initLiquidInkBackground({
         paperColor += paperHighlightColor * clamp(paperLight - 0.62, 0.0, 1.0) * 0.045;
         paperColor -= vec3(0.07, 0.064, 0.054) * paperOcclusion * 0.18;
         paperColor -= vec3(0.028, 0.025, 0.02) * paperFiber * 0.032;
-        paperColor += vec3(paperGrain) * (0.03 + paperHeight * 0.007);
+        paperColor += vec3(paperGrain) * (0.026 + paperRelief * 0.006);
 
         vec3 color = mix(liquidColor, paperColor, uThemeMix);
 

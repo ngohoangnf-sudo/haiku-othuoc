@@ -5,6 +5,17 @@ function mapRange(value, inMin, inMax, outMin, outMax) {
   return ((value - inMin) * (outMax - outMin)) / (inMax - inMin) + outMin;
 }
 
+function createTextureFromImage(image) {
+  const texture = new THREE.Texture(image);
+  texture.needsUpdate = true;
+  if ("colorSpace" in texture && "SRGBColorSpace" in THREE) {
+    texture.colorSpace = THREE.SRGBColorSpace;
+  }
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
 export function initHoverImageEffects({
   container = document.querySelector("main"),
   foreground = container?.querySelector?.("[data-scroll]") || null,
@@ -225,9 +236,19 @@ export function initHoverImageEffects({
 
     ensureTexture(item, onReady) {
       const cachedTexture = this.textures.get(item.wrapper);
-      if (cachedTexture) {
+      const currentImageSource = item.img.currentSrc || item.img.src;
+      if (
+        cachedTexture &&
+        cachedTexture.image &&
+        (cachedTexture.image.currentSrc || cachedTexture.image.src || currentImageSource) === currentImageSource
+      ) {
         onReady(cachedTexture);
         return;
+      }
+
+      if (cachedTexture) {
+        cachedTexture.dispose?.();
+        this.textures.delete(item.wrapper);
       }
 
       const pendingTexture = this.loadingTextures.get(item.wrapper);
@@ -237,19 +258,52 @@ export function initHoverImageEffects({
       }
 
       const texturePromise = new Promise((resolve, reject) => {
-        this.textureLoader.load(
-          item.img.currentSrc || item.img.src,
-          (texture) => {
+        const resolveWithDomImage = () => {
+          try {
+            const texture = createTextureFromImage(item.img);
             this.textures.set(item.wrapper, texture);
             this.loadingTextures.delete(item.wrapper);
             resolve(texture);
-          },
-          undefined,
-          () => {
+          } catch (_error) {
             this.loadingTextures.delete(item.wrapper);
-            reject(new Error("Failed to load hover texture"));
+            reject(new Error("Failed to create hover texture from DOM image"));
           }
-        );
+        };
+
+        if (item.img.complete && item.img.naturalWidth > 0) {
+          resolveWithDomImage();
+          return;
+        }
+
+        const cleanupImageListeners = () => {
+          item.img.removeEventListener("load", handleImageLoad, false);
+          item.img.removeEventListener("error", handleImageError, false);
+        };
+
+        const handleImageLoad = () => {
+          cleanupImageListeners();
+          resolveWithDomImage();
+        };
+
+        const handleImageError = () => {
+          cleanupImageListeners();
+          this.textureLoader.load(
+            currentImageSource,
+            (texture) => {
+              this.textures.set(item.wrapper, texture);
+              this.loadingTextures.delete(item.wrapper);
+              resolve(texture);
+            },
+            undefined,
+            () => {
+              this.loadingTextures.delete(item.wrapper);
+              reject(new Error("Failed to load hover texture"));
+            }
+          );
+        };
+
+        item.img.addEventListener("load", handleImageLoad, false);
+        item.img.addEventListener("error", handleImageError, false);
       });
 
       this.loadingTextures.set(item.wrapper, texturePromise);

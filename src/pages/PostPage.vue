@@ -229,25 +229,51 @@ export default defineComponent({
 @media screen and (max-width: 40em) {
   .post-page__item {
     min-height: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "title"
+      "description"
+      "poem";
+    row-gap: 0;
   }
 
   .post-page__title {
+    grid-area: title;
+    position: relative;
+    z-index: 1;
     font-size: clamp(2rem, 8vw, 2.8rem);
     white-space: normal;
+    line-height: 0.94;
+    margin: 0;
+    padding: 0;
+    text-align: left;
+    align-self: start;
   }
 
   .post-page__description {
-    padding-top: 0.75rem;
+    grid-area: description;
+    z-index: 1;
+    padding: 1rem 0 0;
+    text-align: left;
   }
 
   .post-page__poem {
-    margin-top: 4.5vh;
-    padding-inline: 0;
+    grid-area: poem;
+    margin-top: 2.5rem;
+    padding: 0;
     padding-bottom: 1rem;
+    z-index: 1;
+  }
+
+  .post-page__poem .link {
+    align-items: flex-start;
+    gap: 0.5rem;
   }
 
   .post-page__poem p {
     white-space: normal;
+    max-width: 100%;
   }
 }
 </style>

@@ -51,6 +51,8 @@ class NativeParallaxItem {
     this.scaleYTo = randomFloat(1.26, 1.4);
     this.depthMultiplier = randomFloat(1.15, 1.5);
     this.overflow = this.resolveOverflow();
+    this.absoluteTop = 0;
+    this.height = 0;
     this.ease = 0.14;
     this.current = {
       imageY: 0,
@@ -77,10 +79,16 @@ class NativeParallaxItem {
     return Number.isFinite(overflow) ? overflow : 40;
   }
 
-  update(viewportHeight) {
+  measure(scrollY = window.scrollY || window.pageYOffset || 0) {
     const rect = this.element.getBoundingClientRect();
+    this.absoluteTop = rect.top + scrollY;
+    this.height = rect.height;
+  }
+
+  update(viewportHeight, scrollY = window.scrollY || window.pageYOffset || 0) {
+    const rectTop = this.absoluteTop - scrollY;
     const progress = clamp(
-      (viewportHeight - rect.top) / (viewportHeight + rect.height),
+      (viewportHeight - rectTop) / (viewportHeight + this.height),
       0,
       1
     );
@@ -166,11 +174,37 @@ export function initLandingPage() {
   let rafId = 0;
   let destroyHoverEffects = null;
   let intersectionObserver = null;
+  let resizeObserver = null;
   let visibleItems = new Set();
+  let metricsRafId = 0;
 
   const items = [...contentElement.querySelectorAll(".content__item")].map(
     (element, index) => new NativeParallaxItem(element, index)
   );
+  const itemsByElement = new Map(items.map((item) => [item.element, item]));
+
+  const queueMeasure = ({ refreshOverflow = false } = {}) => {
+    if (destroyed || metricsRafId) {
+      return;
+    }
+
+    metricsRafId = window.requestAnimationFrame(() => {
+      metricsRafId = 0;
+
+      if (destroyed) {
+        return;
+      }
+
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+      items.forEach((item) => {
+        if (refreshOverflow) {
+          item.overflow = item.resolveOverflow();
+        }
+        item.measure(scrollY);
+      });
+      queueRender();
+    });
+  };
 
   const renderVisibleItems = () => {
     rafId = 0;
@@ -180,11 +214,12 @@ export function initLandingPage() {
     }
 
     const viewportHeight = window.innerHeight || 1;
+    const scrollY = window.scrollY || window.pageYOffset || 0;
     const targets = visibleItems.size ? [...visibleItems] : items;
     let hasMotion = false;
 
     targets.forEach((item) => {
-      item.update(viewportHeight);
+      item.update(viewportHeight, scrollY);
       hasMotion = item.renderStep() || hasMotion;
     });
 
@@ -202,10 +237,7 @@ export function initLandingPage() {
   };
 
   const handleResize = () => {
-    items.forEach((item) => {
-      item.overflow = item.resolveOverflow();
-    });
-    queueRender();
+    queueMeasure({ refreshOverflow: true });
   };
 
   const setupVisibilityObserver = () => {
@@ -217,7 +249,7 @@ export function initLandingPage() {
     intersectionObserver = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
-          const item = items.find((candidate) => candidate.element === entry.target);
+          const item = itemsByElement.get(entry.target);
           if (!item) {
             return;
           }
@@ -290,15 +322,27 @@ export function initLandingPage() {
       document.body.classList.remove("loading");
       setupVisibilityObserver();
       setupHoverEffects();
+      const scrollY = window.scrollY || window.pageYOffset || 0;
       const viewportHeight = window.innerHeight || 1;
       items.forEach((item) => {
-        item.update(viewportHeight);
+        item.measure(scrollY);
+        item.update(viewportHeight, scrollY);
         item.renderStep({ immediate: true });
       });
     });
 
   window.addEventListener("scroll", queueRender, { passive: true });
   window.addEventListener("resize", handleResize, { passive: true });
+
+  if (typeof ResizeObserver !== "undefined") {
+    resizeObserver = new ResizeObserver(() => {
+      queueMeasure();
+    });
+    resizeObserver.observe(contentElement);
+    items.forEach((item) => {
+      resizeObserver.observe(item.element);
+    });
+  }
 
   return () => {
     destroyed = true;
@@ -307,10 +351,15 @@ export function initLandingPage() {
       window.cancelAnimationFrame(rafId);
       rafId = 0;
     }
+    if (metricsRafId) {
+      window.cancelAnimationFrame(metricsRafId);
+      metricsRafId = 0;
+    }
 
     window.removeEventListener("scroll", queueRender);
     window.removeEventListener("resize", handleResize);
     intersectionObserver?.disconnect();
+    resizeObserver?.disconnect();
     destroyHoverEffects?.();
     items.forEach((item) => item.reset());
   };

@@ -8,7 +8,7 @@
       </transition>
     </teleport>
 
-    <section class="write-page__composer">
+    <section ref="composerSection" class="write-page__composer">
       <div class="write-page__intro">
         <h1 class="write-page__heading page-reading-h2 page-heading-with-rule">Viết & đăng bài</h1>
         <p class="write-page__lead page-reading-copy">
@@ -22,7 +22,12 @@
       </div>
 
       <div v-if="canEdit" class="write-page__editor">
-        <div class="write-page__mode-switch" role="tablist" aria-label="Chọn loại nội dung">
+        <div
+          ref="composerModeSwitch"
+          class="write-page__mode-switch"
+          role="tablist"
+          aria-label="Chọn loại nội dung"
+        >
           <button
             class="write-page__mode-tab"
             :class="{ 'write-page__mode-tab--active': activeComposer === 'poem' }"
@@ -329,11 +334,12 @@ Một chút quà Edo"
         <p class="write-page__subcopy page-reading-copy">{{ previewPostsTotal }} bài</p>
       </div>
 
-      <div
-        v-if="visiblePosts.length"
-        ref="poemPreviewList"
-        :class="['write-page__preview-list', 'write-page__preview-list--poems']"
-      >
+      <div v-if="visiblePosts.length" class="write-page__preview-carousel-shell">
+        <div
+          ref="poemPreviewList"
+          :class="['write-page__preview-list', 'write-page__preview-list--poems']"
+          @scroll.passive="onPoemPreviewScroll"
+        >
           <article
             v-for="poem in visiblePosts"
             :key="`poem-${previewPostsPage}-${poem.id}`"
@@ -369,6 +375,7 @@ Một chút quà Edo"
               </div>
             </div>
           </article>
+        </div>
       </div>
       <p
         v-else-if="!previewPostsLoading"
@@ -376,24 +383,24 @@ Một chút quà Edo"
       >
         Không tìm thấy haiku phù hợp.
       </p>
-      <div v-if="previewPostsTotalPages > 1" class="write-page__pagination">
+      <div v-if="showPoemPreviewPagination" class="write-page__pagination">
         <button
           class="write-page__pagination-btn"
           type="button"
-          :disabled="previewPostsPage <= 1"
-          @click="changePostPreviewPage(previewPostsPage - 1)"
+          :disabled="poemPreviewPaginationPrevDisabled"
+          @click="handlePostPreviewPrev"
           aria-label="Trang haiku trước"
         >
           &lt;
         </button>
         <p class="write-page__pagination-label page-reading-copy">
-          {{ formatPageNumber(previewPostsPage) }} / {{ formatPageNumber(previewPostsTotalPages) }}
+          {{ poemPreviewPaginationLabel }}
         </p>
         <button
           class="write-page__pagination-btn"
           type="button"
-          :disabled="previewPostsPage >= previewPostsTotalPages"
-          @click="changePostPreviewPage(previewPostsPage + 1)"
+          :disabled="poemPreviewPaginationNextDisabled"
+          @click="handlePostPreviewNext"
           aria-label="Trang haiku sau"
         >
           &gt;
@@ -443,11 +450,12 @@ Một chút quà Edo"
         <p class="write-page__subcopy page-reading-copy">{{ previewEssaysTotal }} bài</p>
       </div>
 
-      <div
-        v-if="visibleEssays.length"
-        ref="essayPreviewList"
-        :class="['write-page__preview-list', 'write-page__preview-list--essays']"
-      >
+      <div v-if="visibleEssays.length" class="write-page__preview-carousel-shell">
+        <div
+          ref="essayPreviewList"
+          :class="['write-page__preview-list', 'write-page__preview-list--essays']"
+          @scroll.passive="onEssayPreviewScroll"
+        >
           <article
             v-for="essay in visibleEssays"
             :key="`essay-${previewEssaysPage}-${essay.id}`"
@@ -492,6 +500,7 @@ Một chút quà Edo"
               </div>
             </div>
           </article>
+        </div>
       </div>
       <p
         v-else-if="!previewEssaysLoading"
@@ -499,24 +508,24 @@ Một chút quà Edo"
       >
         Không tìm thấy nội dung phù hợp trong mục Nghĩ.
       </p>
-      <div v-if="previewEssaysTotalPages > 1" class="write-page__pagination">
+      <div v-if="showEssayPreviewPagination" class="write-page__pagination">
         <button
           class="write-page__pagination-btn"
           type="button"
-          :disabled="previewEssaysPage <= 1"
-          @click="changeEssayPreviewPage(previewEssaysPage - 1)"
+          :disabled="essayPreviewPaginationPrevDisabled"
+          @click="handleEssayPreviewPrev"
           aria-label="Trang bài luận trước"
         >
           &lt;
         </button>
         <p class="write-page__pagination-label page-reading-copy">
-          {{ formatPageNumber(previewEssaysPage) }} / {{ formatPageNumber(previewEssaysTotalPages) }}
+          {{ essayPreviewPaginationLabel }}
         </p>
         <button
           class="write-page__pagination-btn"
           type="button"
-          :disabled="previewEssaysPage >= previewEssaysTotalPages"
-          @click="changeEssayPreviewPage(previewEssaysPage + 1)"
+          :disabled="essayPreviewPaginationNextDisabled"
+          @click="handleEssayPreviewNext"
           aria-label="Trang bài luận sau"
         >
           &gt;
@@ -581,6 +590,8 @@ export default defineComponent({
     const activeComposer = ref("poem");
     const poemImageInput = ref(null);
     const essayImageInput = ref(null);
+    const composerSection = ref(null);
+    const composerModeSwitch = ref(null);
     const poemPreviewSection = ref(null);
     const essayPreviewSection = ref(null);
     const poemPreviewList = ref(null);
@@ -625,6 +636,8 @@ export default defineComponent({
     const previewEssaysTotalPages = ref(1);
     const previewPostsLoading = ref(false);
     const previewEssaysLoading = ref(false);
+    const poemPreviewActiveIndex = ref(0);
+    const essayPreviewActiveIndex = ref(0);
     const activeAuthorSuggestions = ref("");
     const poemPreviewQuery = ref("");
     const essayPreviewQuery = ref("");
@@ -632,12 +645,15 @@ export default defineComponent({
     const essayPreviewKind = ref("");
     const essayPreviewStatus = ref(authStore.canEdit() ? "all" : "published");
     const viewportWidth = ref(syncViewportWidth());
+    const isPreviewCarouselMobile = computed(() => viewportWidth.value <= 800);
     const poemPreviewTransitionId = ref(0);
     const essayPreviewTransitionId = ref(0);
     let toastTimer = null;
     let poemPreviewSearchTimer = null;
     let essayPreviewSearchTimer = null;
     let authorSuggestionsCloseTimer = null;
+    let poemPreviewScrollRaf = 0;
+    let essayPreviewScrollRaf = 0;
 
     const posts = computed(() => previewPosts.value);
     const essays = computed(() => previewEssays.value);
@@ -684,9 +700,58 @@ export default defineComponent({
       { value: "research", label: "Nghiên cứu" },
       { value: "commentary", label: "Bình luận" },
     ];
+    const poemPreviewPaginationLabel = computed(() =>
+      isPreviewCarouselMobile.value
+        ? `${formatPageNumber(Math.min(previewPostsTotal.value, poemPreviewActiveIndex.value + 1 || 1))} / ${formatPageNumber(previewPostsTotal.value || 1)}`
+        : `${formatPageNumber(previewPostsPage.value)} / ${formatPageNumber(previewPostsTotalPages.value)}`
+    );
+    const essayPreviewPaginationLabel = computed(() =>
+      isPreviewCarouselMobile.value
+        ? `${formatPageNumber(Math.min(previewEssaysTotal.value, essayPreviewActiveIndex.value + 1 || 1))} / ${formatPageNumber(previewEssaysTotal.value || 1)}`
+        : `${formatPageNumber(previewEssaysPage.value)} / ${formatPageNumber(previewEssaysTotalPages.value)}`
+    );
+    const showPoemPreviewPagination = computed(() =>
+      isPreviewCarouselMobile.value
+        ? previewPostsTotal.value > 1
+        : previewPostsTotalPages.value > 1
+    );
+    const showEssayPreviewPagination = computed(() =>
+      isPreviewCarouselMobile.value
+        ? previewEssaysTotal.value > 1
+        : previewEssaysTotalPages.value > 1
+    );
+    const poemPreviewPaginationPrevDisabled = computed(() =>
+      isPreviewCarouselMobile.value
+        ? poemPreviewActiveIndex.value <= 0
+        : previewPostsPage.value <= 1
+    );
+    const poemPreviewPaginationNextDisabled = computed(() =>
+      isPreviewCarouselMobile.value
+        ? poemPreviewActiveIndex.value >= Math.max(0, previewPostsTotal.value - 1)
+        : previewPostsPage.value >= previewPostsTotalPages.value
+    );
+    const essayPreviewPaginationPrevDisabled = computed(() =>
+      isPreviewCarouselMobile.value
+        ? essayPreviewActiveIndex.value <= 0
+        : previewEssaysPage.value <= 1
+    );
+    const essayPreviewPaginationNextDisabled = computed(() =>
+      isPreviewCarouselMobile.value
+        ? essayPreviewActiveIndex.value >= Math.max(0, previewEssaysTotal.value - 1)
+        : previewEssaysPage.value >= previewEssaysTotalPages.value
+    );
 
     const handleResize = () => {
       viewportWidth.value = syncViewportWidth();
+    };
+
+    const scrollToComposer = async () => {
+      await nextTick();
+      const target = composerModeSwitch.value || composerSection.value;
+      target?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
     };
 
     const getPoemPreviewColumns = () => {
@@ -765,7 +830,20 @@ export default defineComponent({
       activeAuthorSuggestions.value = "";
     };
 
-    async function loadPostPreviews(page = previewPostsPage.value) {
+    const resetPreviewCarouselPosition = async (type) => {
+      await nextTick();
+      const list = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      if (!list) {
+        return;
+      }
+
+      list.scrollTo({
+        left: 0,
+        behavior: "auto",
+      });
+    };
+
+    async function loadPostPreviews(page = previewPostsPage.value, { append = false } = {}) {
       previewPostsLoading.value = true;
       previewError.value = "";
 
@@ -783,10 +861,14 @@ export default defineComponent({
         const res = await fetch(`${API_BASE}/posts?${query.toString()}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        previewPosts.value = Array.isArray(data?.items) ? data.items : [];
+        const items = Array.isArray(data?.items) ? data.items : [];
+        previewPosts.value = append ? [...previewPosts.value, ...items] : items;
         previewPostsPage.value = Number(data?.page) || 1;
         previewPostsTotal.value = Number(data?.total) || 0;
         previewPostsTotalPages.value = Math.max(1, Number(data?.totalPages) || 1);
+        if (!append) {
+          poemPreviewActiveIndex.value = 0;
+        }
       } catch (err) {
         console.error("Không tải được preview haiku", err);
         previewError.value = "Không tải được danh sách bài viết từ máy chủ.";
@@ -795,7 +877,7 @@ export default defineComponent({
       }
     }
 
-    async function loadEssayPreviews(page = previewEssaysPage.value) {
+    async function loadEssayPreviews(page = previewEssaysPage.value, { append = false } = {}) {
       previewEssaysLoading.value = true;
       previewError.value = "";
 
@@ -816,10 +898,14 @@ export default defineComponent({
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        previewEssays.value = Array.isArray(data?.items) ? data.items : [];
+        const items = Array.isArray(data?.items) ? data.items : [];
+        previewEssays.value = append ? [...previewEssays.value, ...items] : items;
         previewEssaysPage.value = Number(data?.page) || 1;
         previewEssaysTotal.value = Number(data?.total) || 0;
         previewEssaysTotalPages.value = Math.max(1, Number(data?.totalPages) || 1);
+        if (!append) {
+          essayPreviewActiveIndex.value = 0;
+        }
       } catch (err) {
         console.error("Không tải được preview bài luận", err);
         previewError.value = "Không tải được danh sách bài luận từ máy chủ.";
@@ -829,6 +915,10 @@ export default defineComponent({
     }
 
     async function changePostPreviewPage(nextPage) {
+      if (isPreviewCarouselMobile.value) {
+        await movePreviewItem("poem", nextPage > previewPostsPage.value ? 1 : -1);
+        return;
+      }
       const targetPage = Math.min(Math.max(1, nextPage), previewPostsTotalPages.value);
       if (targetPage === previewPostsPage.value && previewPosts.value.length) return;
       const targetCount = getExpectedItemCount(
@@ -841,6 +931,10 @@ export default defineComponent({
     }
 
     async function changeEssayPreviewPage(nextPage) {
+      if (isPreviewCarouselMobile.value) {
+        await movePreviewItem("essay", nextPage > previewEssaysPage.value ? 1 : -1);
+        return;
+      }
       const targetPage = Math.min(Math.max(1, nextPage), previewEssaysTotalPages.value);
       if (targetPage === previewEssaysPage.value && previewEssays.value.length) return;
       const targetCount = getExpectedItemCount(
@@ -869,6 +963,13 @@ export default defineComponent({
     };
 
     const transitionPostPreviews = async (targetPage = 1, isFastExit = false) => {
+      if (isPreviewCarouselMobile.value) {
+        await loadPostPreviews(targetPage, { append: false });
+        await resetPreviewCarouselPosition("poem");
+        poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
       const transitionId = poemPreviewTransitionId.value + 1;
       poemPreviewTransitionId.value = transitionId;
 
@@ -895,6 +996,13 @@ export default defineComponent({
     };
 
     const transitionEssayPreviews = async (targetPage = 1, isFastExit = false) => {
+      if (isPreviewCarouselMobile.value) {
+        await loadEssayPreviews(targetPage, { append: false });
+        await resetPreviewCarouselPosition("essay");
+        essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+
       const transitionId = essayPreviewTransitionId.value + 1;
       essayPreviewTransitionId.value = transitionId;
 
@@ -919,6 +1027,173 @@ export default defineComponent({
 
       await animatePreviewEnter("essay");
     };
+
+    const getPreviewScrollStep = (type) => {
+      const list = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      const firstItem = list?.querySelector?.(".write-page__preview");
+      if (!list || !firstItem) {
+        return 1;
+      }
+
+      const gap = Number.parseFloat(window.getComputedStyle(list).columnGap || window.getComputedStyle(list).gap || "0") || 0;
+      return firstItem.clientWidth + gap;
+    };
+
+    const scrollPreviewToIndex = async (type, index, behavior = "smooth") => {
+      await nextTick();
+      const list = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      if (!list) {
+        return;
+      }
+
+      const step = getPreviewScrollStep(type);
+      list.scrollTo({
+        left: step * Math.max(0, index),
+        behavior,
+      });
+    };
+
+    const maybeAppendMobilePreviewItems = async (type) => {
+      if (!isPreviewCarouselMobile.value) {
+        return;
+      }
+
+      if (type === "essay") {
+        if (
+          essayPreviewEssaysAppendingGuard()
+        ) {
+          return;
+        }
+      } else if (
+        poemPreviewPostsAppendingGuard()
+      ) {
+        return;
+      }
+
+      const activeIndex = type === "essay" ? essayPreviewActiveIndex.value : poemPreviewActiveIndex.value;
+      const items = type === "essay" ? previewEssays.value : previewPosts.value;
+      const page = type === "essay" ? previewEssaysPage.value : previewPostsPage.value;
+      const totalPages = type === "essay" ? previewEssaysTotalPages.value : previewPostsTotalPages.value;
+
+      if (activeIndex < items.length - 2 || page >= totalPages) {
+        return;
+      }
+
+      if (type === "essay") {
+        await loadEssayPreviews(page + 1, { append: true });
+      } else {
+        await loadPostPreviews(page + 1, { append: true });
+      }
+    };
+
+    const poemPreviewPostsAppendingGuard = () => previewPostsLoading.value || previewPostsPage.value >= previewPostsTotalPages.value;
+    const essayPreviewEssaysAppendingGuard = () => previewEssaysLoading.value || previewEssaysPage.value >= previewEssaysTotalPages.value;
+
+    const syncPreviewCarouselIndex = async (type) => {
+      if (!isPreviewCarouselMobile.value) {
+        return;
+      }
+
+      const list = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      if (!list) {
+        return;
+      }
+
+      const step = getPreviewScrollStep(type);
+      const nextIndex = Math.max(0, Math.round(list.scrollLeft / step));
+
+      if (type === "essay") {
+        essayPreviewActiveIndex.value = nextIndex;
+      } else {
+        poemPreviewActiveIndex.value = nextIndex;
+      }
+
+      await maybeAppendMobilePreviewItems(type);
+    };
+
+    const onPoemPreviewScroll = () => {
+      if (!isPreviewCarouselMobile.value) {
+        return;
+      }
+
+      if (poemPreviewScrollRaf) {
+        window.cancelAnimationFrame(poemPreviewScrollRaf);
+      }
+
+      poemPreviewScrollRaf = window.requestAnimationFrame(() => {
+        poemPreviewScrollRaf = 0;
+        syncPreviewCarouselIndex("poem");
+      });
+    };
+
+    const onEssayPreviewScroll = () => {
+      if (!isPreviewCarouselMobile.value) {
+        return;
+      }
+
+      if (essayPreviewScrollRaf) {
+        window.cancelAnimationFrame(essayPreviewScrollRaf);
+      }
+
+      essayPreviewScrollRaf = window.requestAnimationFrame(() => {
+        essayPreviewScrollRaf = 0;
+        syncPreviewCarouselIndex("essay");
+      });
+    };
+
+    const movePreviewItem = async (type, delta) => {
+      const activeIndex = type === "essay" ? essayPreviewActiveIndex.value : poemPreviewActiveIndex.value;
+      const total = type === "essay" ? previewEssaysTotal.value : previewPostsTotal.value;
+      const currentItems = type === "essay" ? previewEssays.value : previewPosts.value;
+      const page = type === "essay" ? previewEssaysPage.value : previewPostsPage.value;
+      const totalPages = type === "essay" ? previewEssaysTotalPages.value : previewPostsTotalPages.value;
+      let targetIndex = Math.max(0, Math.min(total - 1, activeIndex + delta));
+
+      if (targetIndex >= currentItems.length && page < totalPages) {
+        if (type === "essay") {
+          await loadEssayPreviews(page + 1, { append: true });
+        } else {
+          await loadPostPreviews(page + 1, { append: true });
+        }
+      }
+
+      targetIndex = Math.max(
+        0,
+        Math.min(
+          (type === "essay" ? previewEssays.value.length : previewPosts.value.length) - 1,
+          targetIndex
+        )
+      );
+
+      if (type === "essay") {
+        essayPreviewActiveIndex.value = targetIndex;
+      } else {
+        poemPreviewActiveIndex.value = targetIndex;
+      }
+
+      await scrollPreviewToIndex(type, targetIndex);
+      await maybeAppendMobilePreviewItems(type);
+    };
+
+    const handlePostPreviewPrev = () =>
+      (isPreviewCarouselMobile.value
+        ? movePreviewItem("poem", -1)
+        : changePostPreviewPage(previewPostsPage.value - 1));
+
+    const handlePostPreviewNext = () =>
+      (isPreviewCarouselMobile.value
+        ? movePreviewItem("poem", 1)
+        : changePostPreviewPage(previewPostsPage.value + 1));
+
+    const handleEssayPreviewPrev = () =>
+      (isPreviewCarouselMobile.value
+        ? movePreviewItem("essay", -1)
+        : changeEssayPreviewPage(previewEssaysPage.value - 1));
+
+    const handleEssayPreviewNext = () =>
+      (isPreviewCarouselMobile.value
+        ? movePreviewItem("essay", 1)
+        : changeEssayPreviewPage(previewEssaysPage.value + 1));
 
     function persistDraft(type, payload) {
       if (typeof window === "undefined") {
@@ -1137,12 +1412,12 @@ export default defineComponent({
 
     const startEditingPost = (post) => {
       applyPostToForm(post);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      scrollToComposer();
     };
 
     const startEditingEssay = (essay) => {
       applyEssayToForm(essay);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+      scrollToComposer();
     };
 
     const cancelPoemEditing = () => {
@@ -1446,6 +1721,12 @@ export default defineComponent({
       if (toastTimer) {
         window.clearTimeout(toastTimer);
       }
+      if (poemPreviewScrollRaf) {
+        window.cancelAnimationFrame(poemPreviewScrollRaf);
+      }
+      if (essayPreviewScrollRaf) {
+        window.cancelAnimationFrame(essayPreviewScrollRaf);
+      }
       if (typeof window !== "undefined") {
         window.removeEventListener("resize", handleResize);
       }
@@ -1459,6 +1740,8 @@ export default defineComponent({
       essayImageInput,
       poemPreviewSection,
       essayPreviewSection,
+      composerSection,
+      composerModeSwitch,
       poemPreviewList,
       essayPreviewList,
       editingPostId,
@@ -1477,6 +1760,14 @@ export default defineComponent({
       visibleEssays,
       showPoemPreviews,
       showEssayPreviews,
+      showPoemPreviewPagination,
+      showEssayPreviewPagination,
+      poemPreviewPaginationLabel,
+      essayPreviewPaginationLabel,
+      poemPreviewPaginationPrevDisabled,
+      poemPreviewPaginationNextDisabled,
+      essayPreviewPaginationPrevDisabled,
+      essayPreviewPaginationNextDisabled,
       previewPostsPage,
       previewEssaysPage,
       previewPostsTotal,
@@ -1501,6 +1792,12 @@ export default defineComponent({
       error,
       changePostPreviewPage,
       changeEssayPreviewPage,
+      handlePostPreviewPrev,
+      handlePostPreviewNext,
+      handleEssayPreviewPrev,
+      handleEssayPreviewNext,
+      onPoemPreviewScroll,
+      onEssayPreviewScroll,
       openImagePicker,
       clearImage,
       handleImageUpload,
@@ -1586,6 +1883,7 @@ export default defineComponent({
 .write-page__composer {
   width: 100%;
   max-width: 1040px;
+  scroll-margin-top: 6.5rem;
 }
 
 .write-page__intro {
@@ -1624,6 +1922,7 @@ export default defineComponent({
   gap: 2.1rem;
   width: fit-content;
   justify-content: start;
+  scroll-margin-top: 6.5rem;
 }
 
 .write-page__mode-tab {
@@ -2180,6 +2479,11 @@ export default defineComponent({
   min-width: 0;
 }
 
+.write-page__preview-carousel-shell {
+  position: relative;
+  min-width: 0;
+}
+
 .write-page__preview-empty {
   margin: 0;
   padding: 0.4rem 0 0.2rem;
@@ -2365,6 +2669,10 @@ export default defineComponent({
   letter-spacing: 0.12em;
 }
 
+[data-theme="light"] .write-page__pagination-label {
+  color: rgb(18 18 18 / 0.42);
+}
+
 .write-page__pagination-btn {
   border: 0;
   background: transparent;
@@ -2380,6 +2688,10 @@ export default defineComponent({
   transition:
     color 180ms ease,
     opacity 180ms ease;
+}
+
+[data-theme="light"] .write-page__pagination-btn {
+  color: rgb(18 18 18 / 0.42);
 }
 
 .write-page__pagination-btn:hover:not(:disabled) {
@@ -2453,9 +2765,37 @@ export default defineComponent({
     white-space: nowrap;
   }
 
+  .write-page__preview-list {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x mandatory;
+    scroll-padding-inline: 0;
+    gap: 0.9rem;
+    padding-bottom: 0.35rem;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .write-page__preview-list::-webkit-scrollbar {
+    display: none;
+  }
+
   .write-page__preview-list--poems,
   .write-page__preview-list--essays {
-    grid-template-columns: 1fr;
+    grid-template-columns: none;
+  }
+
+  .write-page__preview {
+    flex: 0 0 100%;
+    width: 100%;
+    min-width: 100%;
+    min-height: 0;
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
   }
 
   .write-form__essay-head {

@@ -26,6 +26,7 @@ import { gsap } from "gsap";
 import Header from "components/Header.vue";
 import authStore from "src/stores/authStore";
 import themeStore from "src/stores/themeStore";
+import { createAmbientAudio } from "src/utils/ambientAudio";
 import { MOTION_PRESETS, animatePanelIn, animatePanelOut, killMotion } from "src/utils/motion";
 
 export default defineComponent({
@@ -51,6 +52,7 @@ export default defineComponent({
     let scrollbarYTo = null;
     let scrollbarHeightTo = null;
     let teardownViewportWatcher = null;
+    let ambientAudio = null;
     themeStore.hydrateCachedTheme();
 
     const isWritingRoute = () => route.path.startsWith("/write");
@@ -175,16 +177,24 @@ export default defineComponent({
       const currentTheme = themeStore.state.appliedTheme;
       const mobileMode = isMobilePerformanceMode();
       const showBackground = true;
+      const writingRoute = isWritingRoute();
       const shouldAnimate =
         !mobileMode &&
         currentTheme === "light" &&
-        !isWritingRoute();
-      const shouldInteract = showBackground && (!mobileMode || currentTheme !== "dark");
+        !writingRoute;
+      const shouldInteract =
+        showBackground &&
+        !(
+          writingRoute &&
+          currentTheme === "dark"
+        ) &&
+        (!mobileMode || currentTheme !== "dark");
 
       backgroundEffect?.setActive(showBackground);
       backgroundEffect?.setInteractive(shouldInteract);
       backgroundEffect?.setAnimated(showBackground && shouldAnimate);
       backgroundEffect?.setTheme(currentTheme);
+      ambientAudio?.setTheme(currentTheme);
     };
 
     const prefersReducedMotion = () =>
@@ -238,7 +248,7 @@ export default defineComponent({
 
     const setupScrollbar = () => {
       if (typeof window === "undefined" || !scrollbarThumb.value || isMobilePerformanceMode()) {
-        return;
+        return null;
       }
 
       scrollbarYTo = gsap.quickTo(scrollbarThumb.value, "y", {
@@ -310,6 +320,9 @@ export default defineComponent({
     onMounted(() => {
       authStore.ensureSession();
       themeStore.ensureInitialized();
+      ambientAudio = createAmbientAudio({
+        initialTheme: themeStore.state.appliedTheme,
+      });
       ensureBackgroundEffect();
       syncBackgroundState();
       teardownScrollbar = setupScrollbar();
@@ -349,6 +362,8 @@ export default defineComponent({
       isDisposed = true;
       themeStore.setRouteThemeOverride(null);
       destroyBackgroundEffect();
+      ambientAudio?.destroy();
+      ambientAudio = null;
       teardownScrollbar?.();
       teardownViewportWatcher?.();
     });
