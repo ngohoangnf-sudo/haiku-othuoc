@@ -12,19 +12,20 @@
       <div class="write-page__intro">
         <h1 class="write-page__heading page-reading-h2 page-heading-with-rule">Viết & đăng bài</h1>
         <p class="write-page__lead page-reading-copy">
-          Chọn đăng haiku hoặc nghiên cứu và bình luận.
-        </p>
-        <p v-if="!canEdit" class="write-page__status page-reading-copy">
-          Bạn đang ở quyền Viewer. Hãy <router-link to="/login">đăng nhập</router-link> bằng tài khoản Editor hoặc Admin để đăng và chỉnh sửa nội dung.
+          {{ composerIntroText }}
+          <span v-if="!canEdit">
+          Bài gửi sẽ nằm trong mục chờ duyệt. Biên tập viên có thể chỉnh sửa trước khi xuất bản.
+          </span>
         </p>
         <p v-if="error" class="write-page__status write-page__status--error page-reading-copy">{{ error }}</p>
         <p v-else-if="loading" class="write-page__status page-reading-copy">Đang tải danh sách...</p>
       </div>
 
-      <div v-if="canEdit" class="write-page__editor">
+      <div class="write-page__editor">
         <div
           ref="composerModeSwitch"
           class="write-page__mode-switch"
+          :class="{ 'write-page__mode-switch--triad': canEdit }"
           role="tablist"
           aria-label="Chọn loại nội dung"
         >
@@ -32,7 +33,7 @@
             class="write-page__mode-tab"
             :class="{ 'write-page__mode-tab--active': activeComposer === 'poem' }"
             type="button"
-            @click="activeComposer = 'poem'"
+            @click="chooseComposer('poem')"
           >
             <span class="write-page__mode-tab-label">Haiku</span>
           </button>
@@ -40,13 +41,23 @@
             class="write-page__mode-tab"
             :class="{ 'write-page__mode-tab--active': activeComposer === 'essay' }"
             type="button"
-            @click="activeComposer = 'essay'"
+            @click="chooseComposer('essay')"
           >
             <span class="write-page__mode-tab-label">Nghiên cứu và bình luận</span>
           </button>
+          <button
+            class="write-page__mode-tab"
+            :class="{ 'write-page__mode-tab--active': activeComposer === 'submission' }"
+            type="button"
+            @click="chooseComposer('submission')"
+            v-if="canEdit"
+          >
+            <span class="write-page__mode-tab-label">Duyệt bài</span>
+          </button>
         </div>
 
-        <form v-if="activeComposer === 'poem'" class="write-form" @submit.prevent="submitPoem">
+        <div ref="composerPanelHost" class="write-page__composer-panel-host">
+        <form v-show="showPoemComposer" ref="poemComposerPanel" class="write-form" @submit.prevent="submitPoem">
           <label class="form-field">
             <span class="form-field__label">Tiêu đề</span>
             <input v-model="poemForm.title" class="input" placeholder="Tiêu đề bài" />
@@ -148,7 +159,15 @@ Một chút quà Edo"
           </label>
           <div class="write-form__actions">
             <button class="submit-btn" type="submit">
-              {{ editingPostId ? "Lưu chỉnh sửa" : "Đăng haiku" }}
+              {{ poemSubmitLabel }}
+            </button>
+            <button
+              v-if="showPublishPoemSubmissionButton"
+              class="submit-btn"
+              type="button"
+              @click="publishPoemSubmission()"
+            >
+              Đăng
             </button>
             <button
               v-if="editingPostId"
@@ -162,7 +181,7 @@ Một chút quà Edo"
           <p v-if="poemMessage" class="form-feedback page-reading-copy">{{ poemMessage }}</p>
         </form>
 
-        <form v-else class="write-form" @submit.prevent="submitEssay">
+        <form v-show="showEssayComposer" ref="essayComposerPanel" class="write-form" @submit.prevent="isSubmissionComposer ? submitSubmission() : submitEssay()">
           <div class="write-form__essay-head">
             <label class="form-field">
               <span class="form-field__label">Tiêu đề</span>
@@ -203,7 +222,7 @@ Một chút quà Edo"
                 aria-label="Phân loại bài trong mục Nghĩ"
               />
             </label>
-            <label class="form-field">
+            <label v-if="canEdit && !isSubmissionComposer" class="form-field">
               <span class="form-field__label">Trạng thái</span>
               <ElegantSelect
                 v-model="essayForm.status"
@@ -239,11 +258,11 @@ Một chút quà Edo"
                 class="upload-field__input"
                 type="file"
                 accept="image/*"
-                @change="handleImageUpload($event, 'essay')"
+                @change="handleImageUpload($event, isSubmissionComposer ? 'submission' : 'essay')"
               />
               <div class="upload-field__main">
                 <span class="upload-field__title">
-                  {{ essayUploadedImageName ? "Ảnh bìa đã được tải lên" : essayForm.image ? "Đang dùng ảnh bìa hiện tại" : "Chưa chọn ảnh bìa" }}
+                  {{ essayUploadedImageName ? (isSubmissionComposer ? "Ảnh bài gửi đã được tải lên" : "Ảnh bìa đã được tải lên") : essayForm.image ? (isSubmissionComposer ? "Đang dùng ảnh bài gửi hiện tại" : "Đang dùng ảnh bìa hiện tại") : (isSubmissionComposer ? "Chưa chọn ảnh bài gửi" : "Chưa chọn ảnh bìa") }}
                 </span>
                 <span v-if="essayUploadedImageName || essayForm.image" class="upload-field__meta">
                   {{ essayUploadedImageName || "Có thể là URL ảnh hoặc ảnh đã lưu trước đó" }}
@@ -257,7 +276,7 @@ Một chút quà Edo"
                   v-if="essayForm.image"
                   class="upload-field__button upload-field__button--ghost"
                   type="button"
-                  @click="clearImage('essay')"
+                  @click="clearImage(isSubmissionComposer ? 'submission' : 'essay')"
                 >
                   Bỏ ảnh
                 </button>
@@ -273,17 +292,25 @@ Một chút quà Edo"
             <RichEssayEditor
               v-model="essayForm.body"
               placeholder="Viết nghiên cứu hoặc bình luận ở đây."
-              :upload-image="uploadEssayBodyImage"
+              :upload-image="uploadEssayLikeBodyImage"
               @image-uploaded="handleEssayBodyImageUploaded"
               @error="handleEssayEditorError"
             />
           </label>
           <div class="write-form__actions">
             <button class="submit-btn" type="submit">
-              {{ editingEssaySlug ? "Lưu chỉnh sửa" : "Đăng bài" }}
+              {{ essayLikeSubmitLabel }}
             </button>
             <button
-              v-if="editingEssaySlug"
+              v-if="showPublishSubmissionButton"
+              class="submit-btn"
+              type="button"
+              @click="publishSubmission()"
+            >
+              Đăng
+            </button>
+            <button
+              v-if="essayLikeCancelVisible"
               class="submit-btn submit-btn--ghost"
               type="button"
               @click="cancelEssayEditing"
@@ -293,17 +320,18 @@ Một chút quà Edo"
           </div>
           <p v-if="essayMessage" class="form-feedback page-reading-copy">{{ essayMessage }}</p>
         </form>
+        </div>
       </div>
     </section>
 
     <section
-      v-if="showPoemPreviews"
+      v-if="canEdit ? (activeComposer === 'poem' || activeComposer === 'submission' || showPoemPreviews) : showPoemPreviews"
       ref="poemPreviewSection"
       class="write-page__previews write-page__previews--poems"
     >
       <div class="write-page__previews-head">
         <div class="write-page__previews-head-top">
-          <h2 class="write-page__subheading page-reading-h3">Haiku đã đăng</h2>
+          <h2 class="write-page__subheading page-reading-h3">{{ poemPreviewHeading }}</h2>
           <div class="write-page__preview-tools">
             <label class="write-page__preview-search">
               <span class="write-page__preview-search-icon" aria-hidden="true">⌕</span>
@@ -344,9 +372,12 @@ Một chút quà Edo"
             v-for="poem in visiblePosts"
             :key="`poem-${previewPostsPage}-${poem.id}`"
             class="write-page__preview"
-            :class="{ 'write-page__preview--active': editingPostId === poem.id && activeComposer === 'poem' }"
+            :class="{ 'write-page__preview--active': editingPostId === poem.id && (activeComposer === 'poem' || isSubmissionPoemReview) }"
           >
             <p v-if="poem.title" class="write-page__preview-title">{{ poem.title }}</p>
+            <p v-if="showPoemStatusMeta" class="write-page__essay-meta-line page-reading-copy">
+              {{ formatPoemCategory(poem.category) }} · {{ formatPoemStatus(poem.status) }}
+            </p>
             <div class="write-page__preview-body">
               <p v-for="(line, i) in poem.lines" :key="i" class="write-page__preview-line page-reading-copy">{{ line }}</p>
             </div>
@@ -366,8 +397,16 @@ Một chút quà Edo"
                 </router-link>
               </div>
               <div v-if="canEdit" class="write-page__preview-actions">
-                <button class="write-page__preview-action" type="button" @click="startEditingPost(poem)">
-                  {{ editingPostId === poem.id && activeComposer === 'poem' ? "Đang sửa" : "Sửa" }}
+                <button class="write-page__preview-action" type="button" @click="poem.status === 'submitted' ? startEditingSubmittedPost(poem) : startEditingPost(poem)">
+                  {{ editingPostId === poem.id && (activeComposer === 'poem' || isSubmissionPoemReview) ? "Đang sửa" : "Sửa" }}
+                </button>
+                <button
+                  v-if="poem.status === 'submitted'"
+                  class="write-page__preview-action"
+                  type="button"
+                  @click="publishPoemSubmission(poem)"
+                >
+                  Đăng
                 </button>
                 <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removePost(poem)">
                   Xóa
@@ -381,7 +420,7 @@ Một chút quà Edo"
         v-else-if="!previewPostsLoading"
         class="write-page__preview-empty page-reading-copy"
       >
-        Không tìm thấy haiku phù hợp.
+        {{ poemPreviewEmptyMessage }}
       </p>
       <div v-if="showPoemPreviewPagination" class="write-page__pagination">
         <button
@@ -409,13 +448,13 @@ Một chút quà Edo"
     </section>
 
     <section
-      v-if="showEssayPreviews"
+      v-if="canEdit ? (activeComposer === 'essay' || activeComposer === 'submission' || showEssayPreviews) : showEssayPreviews"
       ref="essayPreviewSection"
       class="write-page__previews write-page__previews--essays"
     >
       <div class="write-page__previews-head">
         <div class="write-page__previews-head-top">
-          <h2 class="write-page__subheading page-reading-h3">Nghiên cứu và bình luận</h2>
+          <h2 class="write-page__subheading page-reading-h3">{{ essayPreviewHeading }}</h2>
           <div class="write-page__preview-tools">
             <label class="write-page__preview-search">
               <span class="write-page__preview-search-icon" aria-hidden="true">⌕</span>
@@ -436,7 +475,7 @@ Một chút quà Edo"
                 aria-label="Lọc nội dung Nghĩ theo mục"
               />
             </label>
-            <label v-if="canEdit" class="write-page__preview-filter">
+            <label v-if="canEdit && !isSubmissionComposer" class="write-page__preview-filter">
               <span class="write-page__preview-filter-label">Trạng thái</span>
               <ElegantSelect
                 v-model="essayPreviewStatus"
@@ -460,11 +499,11 @@ Một chút quà Edo"
             v-for="essay in visibleEssays"
             :key="`essay-${previewEssaysPage}-${essay.id}`"
             class="write-page__preview write-page__preview--essay"
-            :class="{ 'write-page__preview--active': editingEssaySlug === essay.slug && activeComposer === 'essay' }"
+            :class="{ 'write-page__preview--active': editingEssaySlug === essay.slug && (activeComposer === 'essay' || isSubmissionEssayReview) }"
           >
             <p class="write-page__preview-title">{{ essay.title }}</p>
             <p class="write-page__essay-meta-line page-reading-copy">
-              {{ formatEssayKind(essay.kind) }} · {{ essay.status === "draft" ? "Draft" : "Published" }}
+              {{ formatEssayKind(essay.kind) }} · {{ formatEssayStatus(essay.status) }}
             </p>
             <p class="write-page__essay-summary page-reading-copy">{{ essay.summary || excerptEssay(essay.body) }}</p>
             <p v-if="essay.tags?.length" class="write-page__essay-tags page-reading-copy">
@@ -491,8 +530,20 @@ Một chút quà Edo"
                 </router-link>
               </div>
               <div v-if="canEdit" class="write-page__preview-actions">
-                <button class="write-page__preview-action" type="button" @click="startEditingEssay(essay)">
-                  {{ editingEssaySlug === essay.slug && activeComposer === 'essay' ? "Đang sửa" : "Sửa" }}
+                <button
+                  class="write-page__preview-action"
+                  type="button"
+                  @click="essay.status === 'submitted' ? startEditingSubmission(essay) : startEditingEssay(essay)"
+                >
+                  {{ editingEssaySlug === essay.slug && (activeComposer === 'essay' || isSubmissionEssayReview) ? "Đang sửa" : "Sửa" }}
+                </button>
+                <button
+                  v-if="essay.status === 'submitted'"
+                  class="write-page__preview-action"
+                  type="button"
+                  @click="publishSubmission(essay)"
+                >
+                  Đăng
                 </button>
                 <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removeEssay(essay)">
                   Xóa
@@ -506,7 +557,7 @@ Một chút quà Edo"
         v-else-if="!previewEssaysLoading"
         class="write-page__preview-empty page-reading-copy"
       >
-        Không tìm thấy nội dung phù hợp trong mục Nghĩ.
+        {{ essayPreviewEmptyMessage }}
       </p>
       <div v-if="showEssayPreviewPagination" class="write-page__pagination">
         <button
@@ -537,12 +588,21 @@ Một chút quà Edo"
 
 <script>
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
+import { gsap } from "gsap";
 import ElegantSelect from "components/ElegantSelect.vue";
 import RichEssayEditor from "components/RichEssayEditor.vue";
 import blogStore from "src/stores/blogStore";
 import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
-import { MOTION_PRESETS, animateGridEnterByRows, animateGridExit, killMotion } from "src/utils/motion";
+import {
+  MOTION_PRESETS,
+  animateBlockHeight,
+  animateGridEnterByRows,
+  animateGridExit,
+  animatePanelIn,
+  animatePanelOut,
+  killMotion,
+} from "src/utils/motion";
 import { excerptEssayContent, sanitizeEssayHtml, stripEssayText } from "src/utils/essayContent";
 import { uploadImageToMediaStore } from "src/utils/mediaUpload";
 
@@ -596,6 +656,9 @@ export default defineComponent({
     const essayPreviewSection = ref(null);
     const poemPreviewList = ref(null);
     const essayPreviewList = ref(null);
+    const composerPanelHost = ref(null);
+    const poemComposerPanel = ref(null);
+    const essayComposerPanel = ref(null);
     const editingPostId = ref("");
     const editingEssaySlug = ref("");
 
@@ -605,6 +668,7 @@ export default defineComponent({
       category: "vi",
       summary: "",
       image: "",
+      status: "published",
       linesInput: "",
     });
 
@@ -643,11 +707,15 @@ export default defineComponent({
     const essayPreviewQuery = ref("");
     const poemPreviewCategory = ref("");
     const essayPreviewKind = ref("");
-    const essayPreviewStatus = ref(authStore.canEdit() ? "all" : "published");
+    const essayPreviewStatus = ref(authStore.canEdit() ? "editable" : "published");
     const viewportWidth = ref(syncViewportWidth());
     const isPreviewCarouselMobile = computed(() => viewportWidth.value <= 800);
     const poemPreviewTransitionId = ref(0);
     const essayPreviewTransitionId = ref(0);
+    const suppressedPreviewScrollCount = ref(0);
+    const suppressedPreviewMotionCount = ref(0);
+    const composerSwitching = ref(false);
+    const submissionReviewType = ref("");
     let toastTimer = null;
     let poemPreviewSearchTimer = null;
     let essayPreviewSearchTimer = null;
@@ -662,8 +730,11 @@ export default defineComponent({
     const showPoemPreviews = computed(
       () => previewPostsTotal.value > 0 || Boolean(poemPreviewQuery.value) || Boolean(poemPreviewCategory.value)
     );
+    const isSubmissionComposer = computed(() => !canEdit.value || activeComposer.value === "submission");
+    const isSubmissionReviewTab = computed(() => canEdit.value && activeComposer.value === "submission");
+    const poemPreviewStatus = computed(() => (isSubmissionReviewTab.value ? "submitted" : "published"));
     const showEssayPreviews = computed(() => {
-      const defaultStatus = canEdit.value ? "all" : "published";
+      const defaultStatus = canEdit.value ? (isSubmissionComposer.value ? "submitted" : "editable") : "published";
       return (
         previewEssaysTotal.value > 0 ||
         Boolean(essayPreviewQuery.value) ||
@@ -680,12 +751,23 @@ export default defineComponent({
     );
     const error = computed(() => previewError.value || blogStore.state.error || blogStore.state.essaysError);
     const canEdit = computed(() => authStore.canEdit());
+    const composerIntroText = computed(() =>
+      canEdit.value
+        ? "Chọn đăng haiku, nghiên cứu và bình luận, hoặc duyệt bài gửi."
+        : "Chọn gửi haiku hoặc nghiên cứu và bình luận để ban biên tập xem xét và xuất bản sau."
+    );
     const categoryOptions = CATEGORY_OPTIONS;
     const availableAuthors = computed(() => blogStore.getAuthors());
+    const isSubmissionPoemReview = computed(
+      () => canEdit.value && activeComposer.value === "submission" && submissionReviewType.value === "poem" && Boolean(editingPostId.value)
+    );
+    const isSubmissionEssayReview = computed(
+      () => canEdit.value && activeComposer.value === "submission" && submissionReviewType.value === "essay" && Boolean(editingEssaySlug.value)
+    );
     const essayPreviewStatusOptions = computed(() =>
       canEdit.value
         ? [
-            { value: "all", label: "Tất cả" },
+            { value: "editable", label: "Tất cả" },
             { value: "published", label: "Published" },
             { value: "draft", label: "Draft" },
           ]
@@ -709,6 +791,50 @@ export default defineComponent({
       isPreviewCarouselMobile.value
         ? `${formatPageNumber(Math.min(previewEssaysTotal.value, essayPreviewActiveIndex.value + 1 || 1))} / ${formatPageNumber(previewEssaysTotal.value || 1)}`
         : `${formatPageNumber(previewEssaysPage.value)} / ${formatPageNumber(previewEssaysTotalPages.value)}`
+    );
+    const essayPreviewHeading = computed(() =>
+      isSubmissionComposer.value ? "Bài gửi chờ duyệt" : "Nghiên cứu và bình luận"
+    );
+    const essayPreviewEmptyMessage = computed(() =>
+      isSubmissionComposer.value
+        ? "Chưa có bài gửi chờ duyệt."
+        : "Không tìm thấy nội dung phù hợp trong mục Nghĩ."
+    );
+    const essayLikeSubmitLabel = computed(() => {
+      if (isSubmissionComposer.value) {
+        return editingEssaySlug.value ? "Lưu bài gửi" : "Gửi bài";
+      }
+      if (essayForm.status === "submitted") {
+        return "Lưu bài chờ duyệt";
+      }
+      return editingEssaySlug.value ? "Lưu chỉnh sửa" : "Đăng bài Nghĩ";
+    });
+    const poemSubmitLabel = computed(() => {
+      if (!canEdit.value) {
+        return editingPostId.value ? "Lưu haiku gửi" : "Gửi haiku";
+      }
+      if (poemForm.status === "submitted") {
+        return "Lưu haiku chờ duyệt";
+      }
+      return editingPostId.value ? "Lưu chỉnh sửa" : "Đăng haiku";
+    });
+    const showPublishPoemSubmissionButton = computed(
+      () => canEdit.value && editingPostId.value && poemForm.status === "submitted" && (activeComposer.value === "poem" || isSubmissionPoemReview.value)
+    );
+    const showPoemComposer = computed(() => activeComposer.value === "poem" || isSubmissionPoemReview.value);
+    const poemPreviewHeading = computed(() =>
+      isSubmissionReviewTab.value ? "Haiku chờ duyệt" : "Haiku đã đăng"
+    );
+    const poemPreviewEmptyMessage = computed(() =>
+      isSubmissionReviewTab.value ? "Chưa có haiku chờ duyệt." : "Không tìm thấy haiku phù hợp."
+    );
+    const showPoemStatusMeta = computed(() => isSubmissionReviewTab.value);
+    const essayLikeCancelVisible = computed(() => Boolean(editingEssaySlug.value));
+    const showPublishSubmissionButton = computed(
+      () => canEdit.value && Boolean(editingEssaySlug.value) && essayForm.status === "submitted" && (activeComposer.value === "essay" || isSubmissionEssayReview.value)
+    );
+    const showEssayComposer = computed(
+      () => activeComposer.value === "essay" || (!canEdit.value && activeComposer.value !== "poem") || isSubmissionEssayReview.value
     );
     const showPoemPreviewPagination = computed(() =>
       isPreviewCarouselMobile.value
@@ -743,6 +869,179 @@ export default defineComponent({
 
     const handleResize = () => {
       viewportWidth.value = syncViewportWidth();
+    };
+
+    const getSubmissionReviewPanel = (reviewType = submissionReviewType.value) =>
+      reviewType === "poem" ? poemComposerPanel.value : reviewType === "essay" ? essayComposerPanel.value : null;
+
+    const getComposerPanel = (composer = activeComposer.value, reviewType = submissionReviewType.value) => {
+      if (composer === "submission") {
+        return getSubmissionReviewPanel(reviewType);
+      }
+
+      if (composer === "poem") {
+        return poemComposerPanel.value;
+      }
+
+      if (composer === "essay" || (!canEdit.value && composer !== "poem")) {
+        return essayComposerPanel.value;
+      }
+
+      return null;
+    };
+
+    const animateComposerSwitch = async (nextComposer) => {
+      if (composerSwitching.value) {
+        activeComposer.value = nextComposer;
+        return;
+      }
+
+      const host = composerPanelHost.value;
+      const currentPanel = getComposerPanel();
+      const nextPanelTarget = getComposerPanel(nextComposer);
+      const fromHeight = host?.offsetHeight ?? currentPanel?.offsetHeight ?? 0;
+
+      composerSwitching.value = true;
+
+      try {
+        if (nextComposer === "submission") {
+          if (currentPanel) {
+            await animatePanelOut(currentPanel);
+          }
+
+          activeComposer.value = "submission";
+          await nextTick();
+
+          if (host && fromHeight > 0) {
+            await animateBlockHeight(host, fromHeight, 0, { duration: 0.24 });
+          }
+          return;
+        }
+
+        if (activeComposer.value === "submission" && !submissionReviewType.value) {
+          if (nextPanelTarget) {
+            killMotion(nextPanelTarget);
+            gsap.set(nextPanelTarget, {
+              opacity: 0,
+              y: MOTION_PRESETS.editorial.panelIn.fromY,
+              filter: `blur(${MOTION_PRESETS.editorial.panelIn.blur}px)`,
+            });
+          }
+
+          activeComposer.value = nextComposer;
+          await nextTick();
+
+          const nextPanel = getComposerPanel(nextComposer);
+          const toHeight = nextPanel?.offsetHeight ?? host?.scrollHeight ?? 0;
+
+          if (host && toHeight > 0) {
+            await animateBlockHeight(host, 0, toHeight, { duration: 0.28 });
+          }
+
+          if (nextPanel) {
+            await animatePanelIn(nextPanel);
+          }
+          return;
+        }
+
+        if (nextPanelTarget && nextPanelTarget !== currentPanel) {
+          killMotion(nextPanelTarget);
+          gsap.set(nextPanelTarget, {
+            opacity: 0,
+            y: MOTION_PRESETS.editorial.panelIn.fromY,
+            filter: `blur(${MOTION_PRESETS.editorial.panelIn.blur}px)`,
+          });
+        }
+
+        if (currentPanel) {
+          await animatePanelOut(currentPanel);
+        }
+
+        activeComposer.value = nextComposer;
+        await nextTick();
+
+        const nextPanel = getComposerPanel(nextComposer);
+        const toHeight = host?.scrollHeight ?? nextPanel?.offsetHeight ?? fromHeight;
+
+        if (host && fromHeight > 0 && toHeight > 0 && fromHeight !== toHeight) {
+          await animateBlockHeight(host, fromHeight, toHeight, { duration: 0.28 });
+        }
+
+        if (nextPanel) {
+          await animatePanelIn(nextPanel);
+        }
+      } finally {
+        composerSwitching.value = false;
+      }
+    };
+
+    const openSubmissionReviewPanel = async (reviewType) => {
+      if (!["poem", "essay"].includes(reviewType)) {
+        return;
+      }
+
+      if (composerSwitching.value) {
+        submissionReviewType.value = reviewType;
+        activeComposer.value = "submission";
+        return;
+      }
+
+      const host = composerPanelHost.value;
+      const currentPanel = getSubmissionReviewPanel();
+      const currentReviewType = submissionReviewType.value;
+      const fromHeight = host?.offsetHeight ?? currentPanel?.offsetHeight ?? 0;
+
+      composerSwitching.value = true;
+
+      try {
+        if (currentPanel && currentReviewType !== reviewType) {
+          await animatePanelOut(currentPanel);
+        }
+
+        activeComposer.value = "submission";
+        submissionReviewType.value = reviewType;
+        await nextTick();
+
+        const nextPanel = getSubmissionReviewPanel(reviewType);
+        const toHeight = host?.scrollHeight ?? nextPanel?.offsetHeight ?? fromHeight;
+
+        if (host && Number.isFinite(toHeight) && toHeight > 0 && fromHeight !== toHeight) {
+          await animateBlockHeight(host, Math.max(0, fromHeight), toHeight, { duration: 0.28 });
+        }
+
+        if (nextPanel && (!currentPanel || currentReviewType !== reviewType || fromHeight === 0)) {
+          await animatePanelIn(nextPanel);
+        }
+      } finally {
+        composerSwitching.value = false;
+      }
+    };
+
+    const chooseComposer = async (nextComposer) => {
+      if (activeComposer.value === nextComposer) {
+        return;
+      }
+
+      if (canEdit.value && activeComposer.value === "submission" && nextComposer !== "submission") {
+        suppressedPreviewScrollCount.value = 2;
+        suppressedPreviewMotionCount.value = 2;
+        submissionReviewType.value = "";
+      }
+
+      if (canEdit.value && nextComposer === "submission") {
+        suppressedPreviewScrollCount.value = 2;
+        suppressedPreviewMotionCount.value = 2;
+      }
+
+      await animateComposerSwitch(nextComposer);
+
+      if (canEdit.value && nextComposer === "submission") {
+        await nextTick();
+        poemPreviewSection.value?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        });
+      }
     };
 
     const scrollToComposer = async () => {
@@ -851,6 +1150,7 @@ export default defineComponent({
         const query = new URLSearchParams({
           page: String(page),
           pageSize: String(POEM_PREVIEW_PAGE_SIZE),
+          status: poemPreviewStatus.value,
         });
         if (poemPreviewQuery.value) {
           query.set("search", poemPreviewQuery.value);
@@ -858,7 +1158,9 @@ export default defineComponent({
         if (poemPreviewCategory.value) {
           query.set("category", poemPreviewCategory.value);
         }
-        const res = await fetch(`${API_BASE}/posts?${query.toString()}`);
+        const res = await fetch(`${API_BASE}/posts?${query.toString()}`, {
+          headers: authStore.getAuthHeaders(),
+        });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const items = Array.isArray(data?.items) ? data.items : [];
@@ -966,7 +1268,18 @@ export default defineComponent({
       if (isPreviewCarouselMobile.value) {
         await loadPostPreviews(targetPage, { append: false });
         await resetPreviewCarouselPosition("poem");
-        poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (suppressedPreviewScrollCount.value > 0) {
+          suppressedPreviewScrollCount.value -= 1;
+        } else {
+          poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        return;
+      }
+
+      if (suppressedPreviewMotionCount.value > 0) {
+        suppressedPreviewMotionCount.value -= 1;
+        await loadPostPreviews(targetPage);
+        await nextTick();
         return;
       }
 
@@ -986,7 +1299,11 @@ export default defineComponent({
 
       await loadPostPreviews(targetPage);
       await nextTick();
-      poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (suppressedPreviewScrollCount.value > 0) {
+        suppressedPreviewScrollCount.value -= 1;
+      } else {
+        poemPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
 
       if (poemPreviewTransitionId.value !== transitionId) {
         return;
@@ -999,7 +1316,18 @@ export default defineComponent({
       if (isPreviewCarouselMobile.value) {
         await loadEssayPreviews(targetPage, { append: false });
         await resetPreviewCarouselPosition("essay");
-        essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        if (suppressedPreviewScrollCount.value > 0) {
+          suppressedPreviewScrollCount.value -= 1;
+        } else {
+          essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        return;
+      }
+
+      if (suppressedPreviewMotionCount.value > 0) {
+        suppressedPreviewMotionCount.value -= 1;
+        await loadEssayPreviews(targetPage);
+        await nextTick();
         return;
       }
 
@@ -1019,7 +1347,11 @@ export default defineComponent({
 
       await loadEssayPreviews(targetPage);
       await nextTick();
-      essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (suppressedPreviewScrollCount.value > 0) {
+        suppressedPreviewScrollCount.value -= 1;
+      } else {
+        essayPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
 
       if (essayPreviewTransitionId.value !== transitionId) {
         return;
@@ -1266,6 +1598,7 @@ export default defineComponent({
           poemForm.category = data.category || "vi";
           poemForm.summary = data.summary || "";
           poemForm.image = data.image || "";
+          poemForm.status = data.status || "published";
           poemForm.linesInput = data.linesInput || "";
           poemUploadedImageName.value = data.uploadedImageName || "";
         }
@@ -1274,20 +1607,22 @@ export default defineComponent({
       }
     }
 
+    const isEssayLikeType = (type) => type === "essay" || type === "submission";
+
     const clearFileInput = (type) => {
-      const inputRef = type === "essay" ? essayImageInput.value : poemImageInput.value;
+      const inputRef = isEssayLikeType(type) ? essayImageInput.value : poemImageInput.value;
       if (inputRef) {
         inputRef.value = "";
       }
     };
 
     const openImagePicker = (type) => {
-      const inputRef = type === "essay" ? essayImageInput.value : poemImageInput.value;
+      const inputRef = isEssayLikeType(type) ? essayImageInput.value : poemImageInput.value;
       inputRef?.click();
     };
 
     const clearImage = (type) => {
-      if (type === "essay") {
+      if (isEssayLikeType(type)) {
         essayForm.image = "";
         essayUploadedImageName.value = "";
         essayMessage.value = "";
@@ -1316,6 +1651,7 @@ export default defineComponent({
       poemForm.category = "vi";
       poemForm.summary = "";
       poemForm.image = "";
+      poemForm.status = "published";
       poemForm.linesInput = "";
       poemUploadedImageName.value = "";
       clearFileInput("poem");
@@ -1337,21 +1673,22 @@ export default defineComponent({
       clearDraft("essay");
     };
 
-    const applyPostToForm = (post) => {
-      activeComposer.value = "poem";
+    const applyPostToForm = (post, composer = "poem") => {
+      activeComposer.value = composer;
       editingPostId.value = post.id;
       poemForm.title = post.title || "";
       poemForm.author = post.author || "";
       poemForm.category = post.category || "vi";
       poemForm.summary = post.summary || "";
       poemForm.image = post.image || "";
+      poemForm.status = post.status || "published";
       poemForm.linesInput = Array.isArray(post.lines) ? post.lines.join("\n") : "";
       poemUploadedImageName.value = post.image ? "Đang dùng ảnh hiện tại" : "";
       clearFileInput("poem");
     };
 
-    const applyEssayToForm = (essay) => {
-      activeComposer.value = "essay";
+    const applyEssayToForm = (essay, composer = "essay") => {
+      activeComposer.value = composer;
       editingEssaySlug.value = essay.slug;
       essayForm.title = essay.title || "";
       essayForm.author = essay.author || "";
@@ -1370,11 +1707,29 @@ export default defineComponent({
     watch(
       canEdit,
       () => {
-        essayPreviewStatus.value = canEdit.value ? "all" : "published";
+        if (canEdit.value) {
+          essayPreviewStatus.value = isSubmissionComposer.value ? "submitted" : "editable";
+        } else {
+          essayPreviewStatus.value = "published";
+        }
         loadEssayPreviews(1);
       },
       { immediate: true }
     );
+
+    watch(activeComposer, (value) => {
+      if (canEdit.value && value === "submission") {
+        if (essayPreviewStatus.value !== "submitted") {
+          essayPreviewStatus.value = "submitted";
+        }
+      } else if (canEdit.value && essayPreviewStatus.value === "submitted") {
+        essayPreviewStatus.value = "editable";
+      }
+    });
+
+    watch(poemPreviewStatus, () => {
+      transitionPostPreviews(1);
+    });
 
     watch(poemPreviewCategory, () => {
       transitionPostPreviews(1);
@@ -1411,12 +1766,26 @@ export default defineComponent({
     });
 
     const startEditingPost = (post) => {
-      applyPostToForm(post);
+      submissionReviewType.value = "";
+      applyPostToForm(post, "poem");
+      scrollToComposer();
+    };
+
+    const startEditingSubmittedPost = async (post) => {
+      applyPostToForm(post, "submission");
+      await openSubmissionReviewPanel("poem");
       scrollToComposer();
     };
 
     const startEditingEssay = (essay) => {
-      applyEssayToForm(essay);
+      submissionReviewType.value = "";
+      applyEssayToForm(essay, "essay");
+      scrollToComposer();
+    };
+
+    const startEditingSubmission = async (essay) => {
+      applyEssayToForm(essay, "submission");
+      await openSubmissionReviewPanel("essay");
       scrollToComposer();
     };
 
@@ -1424,16 +1793,22 @@ export default defineComponent({
       showToast("Đã hủy chế độ chỉnh sửa haiku.");
       poemMessage.value = "";
       resetPoemForm();
+      if (activeComposer.value === "submission") {
+        submissionReviewType.value = "";
+      }
     };
 
     const cancelEssayEditing = () => {
-      showToast("Đã hủy chế độ chỉnh sửa bài luận.");
+      showToast(isSubmissionComposer.value ? "Đã hủy chế độ chỉnh sửa bài gửi." : "Đã hủy chế độ chỉnh sửa bài luận.");
       essayMessage.value = "";
       resetEssayForm();
+      if (activeComposer.value === "submission") {
+        submissionReviewType.value = "";
+      }
     };
 
     const setScopedMessage = (type, value) => {
-      if (type === "essay") {
+      if (isEssayLikeType(type)) {
         essayMessage.value = value;
       } else {
         poemMessage.value = value;
@@ -1458,22 +1833,24 @@ export default defineComponent({
         return uploaded;
       } catch (error) {
         const fallback =
-          type === "essay"
-            ? "Không tải được ảnh bìa lên kho media."
+          type === "submission"
+            ? "Không tải được ảnh bài gửi lên kho media."
+            : type === "essay"
+              ? "Không tải được ảnh bìa lên kho media."
             : "Không tải được ảnh haiku lên kho media.";
         throw new Error(error?.message || fallback);
       }
     };
 
-    const uploadEssayBodyImage = async (file) =>
+    const uploadEssayLikeBodyImage = async (file) =>
       uploadImageToMediaStore(file, {
-        scope: "essay-inline",
+        scope: isSubmissionComposer.value ? "submission-inline" : "essay-inline",
       });
 
     const handleImageUpload = async (event, type) => {
       const file = event.target?.files?.[0];
       if (!file) {
-        if (type === "essay") {
+        if (isEssayLikeType(type)) {
           essayUploadedImageName.value = "";
         } else {
           poemUploadedImageName.value = "";
@@ -1496,10 +1873,16 @@ export default defineComponent({
       try {
         const uploaded = await uploadMediaFile(
           file,
-          type === "essay" ? "essay-cover" : "poem-cover",
+          type === "submission"
+            ? "submission-cover"
+            : type === "essay"
+              ? "essay-cover"
+              : canEdit.value
+                ? "poem-cover"
+                : "submission-cover",
           type
         );
-        if (type === "essay") {
+        if (isEssayLikeType(type)) {
           essayForm.image = uploaded.url;
           essayUploadedImageName.value = file.name;
           essayMessage.value = "";
@@ -1547,7 +1930,7 @@ export default defineComponent({
     watch(
       essayForm,
       (value) => {
-        if (!canEdit.value || editingEssaySlug.value) {
+        if (editingEssaySlug.value) {
           return;
         }
 
@@ -1578,6 +1961,7 @@ export default defineComponent({
           category: poemForm.category,
           summary: poemForm.summary,
           image: poemForm.image,
+          status: canEdit.value ? poemForm.status || "published" : "submitted",
           lines,
         };
 
@@ -1586,17 +1970,92 @@ export default defineComponent({
           : await blogStore.addPost(payload);
 
         await loadPostPreviews(editingPostId.value ? previewPostsPage.value : 1);
-        showToast(editingPostId.value
-          ? `Đã cập nhật bài của ${post.author}.`
-          : post.title
-            ? `Đã đăng "${post.title}" của ${post.author}.`
-            : `Đã đăng bài mới của ${post.author}.`);
-        poemMessage.value = "";
+        showToast(
+          !canEdit.value
+            ? post.title
+              ? `Đã gửi "${post.title}" để chờ duyệt.`
+              : `Đã gửi haiku của ${post.author} để chờ duyệt.`
+            : editingPostId.value
+              ? `Đã cập nhật bài của ${post.author}.`
+              : post.title
+                ? `Đã đăng "${post.title}" của ${post.author}.`
+                : `Đã đăng bài mới của ${post.author}.`
+        );
+        poemMessage.value = canEdit.value ? "" : "Haiku đã được lưu vào mục chờ duyệt.";
         resetPoemForm();
+        if (canEdit.value && activeComposer.value === "submission") {
+          submissionReviewType.value = "";
+        }
       } catch (_err) {
         poemMessage.value = editingPostId.value
           ? "Không cập nhật được bài. Thử lại sau."
           : "Không đăng được bài. Thử lại sau.";
+      }
+    };
+
+    const buildPoemPayload = (status) => ({
+      title: poemForm.title,
+      author: poemForm.author,
+      category: poemForm.category,
+      summary: poemForm.summary,
+      image: poemForm.image,
+      status,
+      lines: poemForm.linesInput
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean),
+    });
+
+    const publishPoemSubmission = async (post = null) => {
+      poemMessage.value = "";
+
+      let id = editingPostId.value;
+      let payload;
+
+      if (post && post.id !== editingPostId.value) {
+        id = post.id;
+        payload = {
+          title: post.title || "",
+          author: post.author || "",
+          category: post.category || "vi",
+          summary: post.summary || "",
+          image: post.image || "",
+          lines: Array.isArray(post.lines) ? post.lines : [],
+          status: "published",
+        };
+      } else {
+        const lines = poemForm.linesInput
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean);
+        if (!lines.length) {
+          poemMessage.value = "Hãy nhập ít nhất một dòng haiku trước khi đăng.";
+          return;
+        }
+        payload = {
+          ...buildPoemPayload("published"),
+          lines,
+        };
+      }
+
+      if (!id) {
+        poemMessage.value = "Hãy lưu haiku gửi trước khi đăng.";
+        return;
+      }
+
+      try {
+        const published = await blogStore.updatePost(id, payload);
+        await loadPostPreviews(previewPostsPage.value);
+        showToast(
+          published.title
+            ? `Đã duyệt và đăng "${published.title}".`
+            : `Đã duyệt và đăng haiku của ${published.author}.`
+        );
+        poemMessage.value = "";
+        resetPoemForm();
+        submissionReviewType.value = "";
+      } catch (_err) {
+        poemMessage.value = "Không đăng được haiku gửi. Thử lại sau.";
       }
     };
 
@@ -1638,10 +2097,133 @@ export default defineComponent({
           : `Đã đăng "${essay.title}" vào mục Nghĩ.`);
         essayMessage.value = "";
         resetEssayForm();
+        if (canEdit.value && activeComposer.value === "submission") {
+          submissionReviewType.value = "";
+        }
       } catch (_err) {
         essayMessage.value = editingEssaySlug.value
           ? "Không cập nhật được bài luận. Thử lại sau."
           : "Không đăng được bài luận. Thử lại sau.";
+      }
+    };
+
+    const buildEssayPayload = (status) => ({
+      title: essayForm.title.trim(),
+      author: essayForm.author,
+      kind: essayForm.kind,
+      summary: essayForm.summary,
+      image: essayForm.image,
+      body: sanitizeEssayHtml(essayForm.body),
+      tags: normalizeTagsInput(essayForm.tagsInput),
+      status,
+    });
+
+    const validateEssayLikeForm = () => {
+      const title = essayForm.title.trim();
+      const body = sanitizeEssayHtml(essayForm.body);
+      const bodyText = stripEssayText(body);
+
+      if (!title) {
+        essayMessage.value = isSubmissionComposer.value
+          ? "Hãy nhập tiêu đề cho bài gửi."
+          : "Hãy nhập tiêu đề cho bài luận.";
+        return null;
+      }
+
+      if (!bodyText) {
+        essayMessage.value = isSubmissionComposer.value
+          ? "Hãy nhập nội dung cho bài gửi."
+          : "Hãy nhập nội dung bài luận hoặc ghi chép.";
+        return null;
+      }
+
+      return body;
+    };
+
+    const submitSubmission = async () => {
+      essayMessage.value = "";
+      const body = validateEssayLikeForm();
+      if (!body) {
+        return;
+      }
+
+      try {
+        const payload = {
+          ...buildEssayPayload("submitted"),
+          body,
+        };
+
+        const essay = editingEssaySlug.value
+          ? await blogStore.updateEssay(editingEssaySlug.value, payload)
+          : await blogStore.addEssay(payload);
+
+        if (canEdit.value) {
+          await loadEssayPreviews(editingEssaySlug.value ? previewEssaysPage.value : 1);
+        }
+        showToast(
+          editingEssaySlug.value
+            ? `Đã cập nhật bài gửi "${essay.title}".`
+            : `Đã gửi "${essay.title}" để chờ duyệt.`
+        );
+        essayMessage.value = canEdit.value ? "" : "Bài gửi đã được lưu vào mục chờ duyệt.";
+        resetEssayForm();
+        if (canEdit.value) {
+          submissionReviewType.value = "";
+        }
+        if (!canEdit.value) {
+          activeComposer.value = "submission";
+        }
+      } catch (_err) {
+        essayMessage.value = editingEssaySlug.value
+          ? "Không cập nhật được bài gửi. Thử lại sau."
+          : "Không gửi được bài. Thử lại sau.";
+      }
+    };
+
+    const publishSubmission = async (essay = null) => {
+      essayMessage.value = "";
+
+      let slug = editingEssaySlug.value;
+      let payload;
+
+      if (essay && essay.slug !== editingEssaySlug.value) {
+        slug = essay.slug;
+        payload = {
+          title: essay.title?.trim() || "",
+          author: essay.author || "",
+          kind: essay.kind || "commentary",
+          summary: essay.summary || "",
+          image: essay.image || "",
+          body: sanitizeEssayHtml(essay.body || ""),
+          tags: Array.isArray(essay.tags) ? essay.tags.map((tag) => tag.label) : [],
+          status: "published",
+        };
+      } else {
+        const body = validateEssayLikeForm();
+        if (!body) {
+          return;
+        }
+        payload = {
+          ...buildEssayPayload("published"),
+          body,
+        };
+      }
+
+      if (!slug) {
+        essayMessage.value = "Hãy lưu bài gửi trước khi đăng.";
+        return;
+      }
+
+      try {
+        const published = await blogStore.updateEssay(slug, payload);
+        await loadEssayPreviews(previewEssaysPage.value);
+        showToast(`Đã duyệt và đăng "${published.title}".`);
+        essayMessage.value = "";
+        resetEssayForm();
+        activeComposer.value = "submission";
+        submissionReviewType.value = "";
+      } catch (_err) {
+        essayMessage.value = "Không đăng được bài gửi. Thử lại sau.";
       }
     };
 
@@ -1696,6 +2278,21 @@ export default defineComponent({
     const formatEssayKind = (value = "") =>
       value === "research" ? "Nghiên cứu" : "Bình luận";
 
+    const formatPoemCategory = (value = "") => {
+      if (value === "jp") return "Nhật";
+      if (value === "global") return "Thế giới";
+      return "Việt";
+    };
+
+    const formatPoemStatus = (value = "") =>
+      value === "submitted" ? "Chờ duyệt" : "Published";
+
+    const formatEssayStatus = (value = "") => {
+      if (value === "draft") return "Draft";
+      if (value === "submitted") return "Chờ duyệt";
+      return "Published";
+    };
+
     const formatDate = (value) => {
       if (!value) return "";
       try {
@@ -1744,6 +2341,9 @@ export default defineComponent({
       composerModeSwitch,
       poemPreviewList,
       essayPreviewList,
+      composerPanelHost,
+      poemComposerPanel,
+      essayComposerPanel,
       editingPostId,
       editingEssaySlug,
       poemForm,
@@ -1758,6 +2358,8 @@ export default defineComponent({
       essays,
       visiblePosts,
       visibleEssays,
+      isSubmissionPoemReview,
+      isSubmissionEssayReview,
       showPoemPreviews,
       showEssayPreviews,
       showPoemPreviewPagination,
@@ -1786,10 +2388,12 @@ export default defineComponent({
       essayPreviewKindOptions,
       essayPreviewStatusOptions,
       essayKindOptions,
+      composerIntroText,
       canEdit,
       categoryOptions,
       loading,
       error,
+      chooseComposer,
       changePostPreviewPage,
       changeEssayPreviewPage,
       handlePostPreviewPrev,
@@ -1802,20 +2406,41 @@ export default defineComponent({
       clearImage,
       handleImageUpload,
       submitPoem,
+      publishPoemSubmission,
       submitEssay,
+      submitSubmission,
+      publishSubmission,
       startEditingPost,
+      startEditingSubmittedPost,
       startEditingEssay,
+      startEditingSubmission,
       cancelPoemEditing,
       cancelEssayEditing,
       removePost,
       removeEssay,
       formatDate,
       formatPageNumber,
+      formatPoemCategory,
+      formatPoemStatus,
       formatEssayKind,
+      formatEssayStatus,
       excerptEssay,
       handleEssayBodyImageUploaded,
       handleEssayEditorError,
-      uploadEssayBodyImage,
+      uploadEssayLikeBodyImage,
+      isSubmissionComposer,
+      showPoemComposer,
+      showEssayComposer,
+      poemSubmitLabel,
+      showPublishPoemSubmissionButton,
+      poemPreviewHeading,
+      poemPreviewEmptyMessage,
+      showPoemStatusMeta,
+      essayPreviewHeading,
+      essayPreviewEmptyMessage,
+      essayLikeSubmitLabel,
+      essayLikeCancelVisible,
+      showPublishSubmissionButton,
       openAuthorSuggestions,
       scheduleAuthorSuggestionsClose,
       selectSuggestedAuthor,
@@ -1896,6 +2521,10 @@ export default defineComponent({
   grid-template-columns: minmax(0, 1fr);
 }
 
+.write-page__composer-panel-host {
+  min-width: 0;
+}
+
 .write-page__heading {
   margin: 0;
   font-family: var(--font-title);
@@ -1923,6 +2552,10 @@ export default defineComponent({
   width: fit-content;
   justify-content: start;
   scroll-margin-top: 6.5rem;
+}
+
+.write-page__mode-switch--triad {
+  grid-template-columns: repeat(3, max-content);
 }
 
 .write-page__mode-tab {
@@ -2755,6 +3388,10 @@ export default defineComponent({
     grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
     width: 100%;
     gap: 1rem;
+  }
+
+  .write-page__mode-switch--triad {
+    grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.18fr) minmax(0, 0.64fr);
   }
 
   .write-page__mode-tab {

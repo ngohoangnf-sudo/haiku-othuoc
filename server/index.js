@@ -271,7 +271,7 @@ app.get("/api/me/activity", requireEditor, async (req, res) => {
   }
 });
 
-app.post("/api/media/presign", requireEditor, async (req, res) => {
+app.post("/api/media/presign", async (req, res) => {
   try {
     if (!S3_UPLOAD_BUCKET || !S3_UPLOAD_REGION || !MEDIA_PUBLIC_BASE) {
       return res.status(503).json({
@@ -283,6 +283,16 @@ app.post("/api/media/presign", requireEditor, async (req, res) => {
     const contentType = typeof req.body?.contentType === "string" ? req.body.contentType.trim() : "";
     const scope = normalizeMediaUploadScope(req.body?.scope);
     const size = Number(req.body?.size || 0);
+    const canManageContent = ["editor", "admin"].includes(req.auth.role);
+    const isSubmissionScope = scope.startsWith("submissions/");
+
+    if (!canManageContent && !isSubmissionScope) {
+      return res.status(req.auth.user ? 403 : 401).json({
+        message: req.auth.user
+          ? "Bạn không có quyền upload media cho nội dung này."
+          : "Cần đăng nhập Editor/Admin để upload media cho nội dung này.",
+      });
+    }
 
     if (!fileName || !contentType) {
       return res.status(400).json({ message: "Thiếu thông tin file upload." });
@@ -306,7 +316,7 @@ app.post("/api/media/presign", requireEditor, async (req, res) => {
       fileName,
       contentType,
       scope,
-      actorUserId: req.auth.user.id,
+      actorUserId: req.auth.user?.id || null,
     });
 
     res.json(upload);
@@ -437,10 +447,19 @@ app.get("/api/admin/activity", requireAdmin, async (req, res) => {
 
 app.get("/api/posts", async (req, res) => {
   try {
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const canManagePosts = ["editor", "admin"].includes(req.auth.role);
+    const resolvedStatus =
+      canManagePosts && requestedStatus === "all"
+        ? null
+        : requestedStatus && requestedStatus !== "all"
+          ? requestedStatus
+          : "published";
     const filters = {
       category: req.query.category,
       authorSlug: req.query.authorSlug,
       search: req.query.search,
+      status: resolvedStatus,
     };
     const hasPagination =
       req.query.page !== undefined || req.query.pageSize !== undefined;
@@ -477,7 +496,9 @@ app.get("/api/posts/random", async (_req, res) => {
 
 app.get("/api/posts/:id", async (req, res) => {
   try {
-    const post = await db.getPostById(req.params.id);
+    const post = await db.getPostById(req.params.id, {
+      status: ["editor", "admin"].includes(req.auth.role) ? null : "published",
+    });
     if (!post) return res.status(404).json({ message: "Không tìm thấy bài" });
     res.json(post);
   } catch (err) {
@@ -486,40 +507,45 @@ app.get("/api/posts/:id", async (req, res) => {
   }
 });
 
-app.post("/api/posts", requireEditor, async (req, res) => {
+app.post("/api/posts", async (req, res) => {
   try {
     const input = req.body || {};
     const lines = Array.isArray(input.lines)
       ? input.lines.filter((l) => l && String(l).trim())
       : [];
+    const canManagePosts = ["editor", "admin"].includes(req.auth.role);
 
     if (!lines.length) {
       return res.status(400).json({ message: "Cần ít nhất một dòng haiku" });
     }
 
     const now = new Date().toISOString();
+    const status = canManagePosts
+      ? normalizePoemStatus(input.status, "published")
+      : "submitted";
     const post = {
       id: input.id || randomUUID(),
       title: typeof input.title === "string" ? input.title.trim() : "",
       author: input.author || "Vô danh",
       authorSlug: input.authorSlug || slugify(input.author || "vo-danh"),
-      createdByUserId: req.auth.user.id,
+      createdByUserId: canManagePosts ? req.auth.user.id : null,
       category: input.category || "vi",
       lines,
       summary: input.summary || "",
       image: input.image || "",
-      publishedAt: input.publishedAt || now.split("T")[0],
+      status,
+      publishedAt: status === "published" ? input.publishedAt || now.split("T")[0] : null,
       createdAt: now,
       updatedAt: now,
     };
 
     const created = await db.insertPost(post);
     await logActivity(req, {
-      actorUserId: req.auth.user.id,
-      action: "post.create",
+      actorUserId: req.auth.user?.id || null,
+      action: canManagePosts ? "post.create" : "poem.submission.create",
       resourceType: "poem",
       resourceId: created.id,
-      details: { title: created.title, category: created.category },
+      details: { title: created.title, category: created.category, status: created.status },
     });
     res.status(201).json(created);
   } catch (err) {
@@ -530,7 +556,7 @@ app.post("/api/posts", requireEditor, async (req, res) => {
 
 app.put("/api/posts/:id", requireEditor, async (req, res) => {
   try {
-    const existing = await db.getPostById(req.params.id);
+    const existing = await db.getPostById(req.params.id, { status: null });
     if (!existing) {
       return res.status(404).json({ message: "Không tìm thấy bài viết để cập nhật" });
     }
@@ -539,6 +565,7 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
     const lines = Array.isArray(input.lines)
       ? input.lines.filter((l) => l && String(l).trim())
       : existing.lines;
+    const nextStatus = normalizePoemStatus(input.status, existing.status);
 
     if (!lines.length) {
       return res.status(400).json({ message: "Cần ít nhất một dòng haiku" });
@@ -560,7 +587,11 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
       lines,
       summary: typeof input.summary === "string" ? input.summary : existing.summary,
       image: typeof input.image === "string" ? input.image : existing.image,
-      publishedAt: input.publishedAt || existing.publishedAt,
+      status: nextStatus,
+      publishedAt:
+        nextStatus === "published"
+          ? input.publishedAt || existing.publishedAt || new Date().toISOString().split("T")[0]
+          : null,
       updatedAt: new Date().toISOString(),
     });
 
@@ -580,7 +611,7 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
 
 app.delete("/api/posts/:id", requireEditor, async (req, res) => {
   try {
-    const existing = await db.getPostById(req.params.id);
+    const existing = await db.getPostById(req.params.id, { status: null });
     const deleted = await db.deletePost(req.params.id);
     if (!deleted) {
       return res.status(404).json({ message: "Không tìm thấy bài viết để xóa" });
@@ -615,8 +646,10 @@ app.get("/api/essays", async (req, res) => {
     const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
     const canManageEssays = ["editor", "admin"].includes(req.auth.role);
     const resolvedStatus =
-      canManageEssays && requestedStatus === "all"
-        ? null
+      canManageEssays
+        ? requestedStatus === "all"
+          ? null
+          : requestedStatus || "editable"
         : requestedStatus && requestedStatus !== "all"
           ? requestedStatus
           : "published";
@@ -652,8 +685,10 @@ app.get("/api/essay-tags", async (req, res) => {
     const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
     const canManageEssays = ["editor", "admin"].includes(req.auth.role);
     const resolvedStatus =
-      canManageEssays && requestedStatus === "all"
-        ? null
+      canManageEssays
+        ? requestedStatus === "all"
+          ? null
+          : requestedStatus || "editable"
         : requestedStatus && requestedStatus !== "all"
           ? requestedStatus
           : "published";
@@ -684,11 +719,12 @@ app.get("/api/essays/:slug", async (req, res) => {
   }
 });
 
-app.post("/api/essays", requireEditor, async (req, res) => {
+app.post("/api/essays", async (req, res) => {
   try {
     const input = req.body || {};
     const title = typeof input.title === "string" ? input.title.trim() : "";
     const body = typeof input.body === "string" ? input.body.trim() : "";
+    const canManageEssays = ["editor", "admin"].includes(req.auth.role);
 
     if (!title) {
       return res.status(400).json({ message: "Tiêu đề bài luận là bắt buộc" });
@@ -699,31 +735,34 @@ app.post("/api/essays", requireEditor, async (req, res) => {
     }
 
     const now = new Date().toISOString();
+    const status = canManageEssays
+      ? normalizeEssayStatus(input.status, "published")
+      : "submitted";
     const essay = {
       id: input.id || randomUUID(),
       slug: uniqueEssaySlug(title, input.slug),
       title,
       author: typeof input.author === "string" ? input.author.trim() : "",
       authorSlug: resolveAuthorSlug(input.authorSlug, input.author),
-      createdByUserId: req.auth.user.id,
+      createdByUserId: canManageEssays ? req.auth.user.id : null,
       kind: input.kind === "research" ? "research" : "commentary",
       summary: typeof input.summary === "string" ? input.summary.trim() : "",
       body,
       image: typeof input.image === "string" ? input.image.trim() : "",
       tags: normalizeEssayTags(input.tags),
-      status: input.status || "published",
-      publishedAt: input.publishedAt || now,
+      status,
+      publishedAt: status === "published" ? input.publishedAt || now : null,
       createdAt: now,
       updatedAt: now,
     };
 
     const created = await db.insertEssay(essay);
     await logActivity(req, {
-      actorUserId: req.auth.user.id,
-      action: "essay.create",
+      actorUserId: req.auth.user?.id || null,
+      action: canManageEssays ? "essay.create" : "essay.submission.create",
       resourceType: "essay",
       resourceId: created.id,
-      details: { title: created.title, slug: created.slug },
+      details: { title: created.title, slug: created.slug, status: created.status },
     });
     res.status(201).json(created);
   } catch (err) {
@@ -748,6 +787,7 @@ app.put("/api/essays/:slug", requireEditor, async (req, res) => {
       typeof input.body === "string" && input.body.trim()
         ? input.body.trim()
         : existing.body;
+    const nextStatus = normalizeEssayStatus(input.status, existing.status);
 
     const updated = await db.updateEssay({
       ...existing,
@@ -773,8 +813,11 @@ app.put("/api/essays/:slug", requireEditor, async (req, res) => {
       body: nextBody,
       image: typeof input.image === "string" ? input.image.trim() : existing.image,
       tags: input.tags !== undefined ? normalizeEssayTags(input.tags) : existing.tags,
-      status: input.status || existing.status,
-      publishedAt: input.publishedAt || existing.publishedAt,
+      status: nextStatus,
+      publishedAt:
+        nextStatus === "published"
+          ? input.publishedAt || existing.publishedAt || new Date().toISOString()
+          : null,
       updatedAt: new Date().toISOString(),
     });
 
@@ -1531,6 +1574,31 @@ function normalizeEssayTags(tags) {
     });
 }
 
+function normalizePoemStatus(value, fallback = "published") {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  switch (normalized) {
+    case "published":
+    case "submitted":
+      return normalized;
+    default:
+      return fallback;
+  }
+}
+
+function normalizeEssayStatus(value, fallback = "published") {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  switch (normalized) {
+    case "draft":
+    case "published":
+    case "submitted":
+      return normalized;
+    default:
+      return fallback;
+  }
+}
+
 function uniqueEssaySlug(title, preferredSlug, essayId = "") {
   const base = slugify(preferredSlug || title || essayId || randomUUID());
   return base || `essay-${randomUUID()}`;
@@ -1575,6 +1643,10 @@ function normalizeMediaUploadScope(value = "") {
       return "essays/covers";
     case "essay-inline":
       return "essays/inline";
+    case "submission-cover":
+      return "submissions/covers";
+    case "submission-inline":
+      return "submissions/inline";
     default:
       return "misc";
   }

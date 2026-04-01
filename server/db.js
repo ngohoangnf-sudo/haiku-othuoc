@@ -54,6 +54,7 @@ function mapPoemRow(row) {
     lines: Array.isArray(row.lines) ? row.lines : [],
     summary: row.summary || "",
     image: row.image || "",
+    status: row.status || "published",
     postedBy: row.postedById
       ? {
           id: row.postedById,
@@ -689,6 +690,11 @@ async function getAllPosts(filters = {}) {
     )`);
   }
 
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`p.status = $${values.length}`);
+  }
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
 
   const result = await pool.query(
@@ -699,6 +705,7 @@ async function getAllPosts(filters = {}) {
         p.title,
         p.category,
         p.summary,
+        p.status,
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
@@ -758,6 +765,11 @@ async function getPagedPosts(filters = {}, pagination = {}) {
     )`);
   }
 
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`p.status = $${values.length}`);
+  }
+
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   const pageSize = Math.max(1, Math.min(Number(pagination.pageSize) || 12, 100));
   const page = Math.max(1, Number(pagination.page) || 1);
@@ -794,6 +806,7 @@ async function getPagedPosts(filters = {}, pagination = {}) {
         p.title,
         p.category,
         p.summary,
+        p.status,
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
@@ -830,8 +843,16 @@ async function getPagedPosts(filters = {}, pagination = {}) {
   };
 }
 
-async function getPostById(id) {
+async function getPostById(id, options = { status: null }) {
   await init();
+
+  const values = [id];
+  const clauses = ["p.id = $1"];
+
+  if (options.status !== null) {
+    values.push(options.status || "published");
+    clauses.push(`p.status = $${values.length}`);
+  }
 
   const result = await pool.query(
     `
@@ -841,6 +862,7 @@ async function getPostById(id) {
         p.title,
         p.category,
         p.summary,
+        p.status,
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
@@ -859,10 +881,10 @@ async function getPostById(id) {
       LEFT JOIN users u ON u.id = p.created_by_user_id
       LEFT JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
-      WHERE p.id = $1
+      WHERE ${clauses.join(" AND ")}
       GROUP BY p.id, a.id, u.id, m.id
     `,
-    [id]
+    values
   );
 
   return result.rowCount ? mapPoemRow(result.rows[0]) : null;
@@ -879,6 +901,7 @@ async function getRandomPostWithImage() {
         p.title,
         p.category,
         p.summary,
+        p.status,
         p.published_at AS "publishedAt",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
@@ -898,6 +921,7 @@ async function getRandomPostWithImage() {
       JOIN media_assets m ON m.id = p.media_asset_id
       LEFT JOIN poem_lines pl ON pl.poem_id = p.id
       WHERE COALESCE(m.source, '') <> ''
+        AND p.status = 'published'
       GROUP BY p.id, a.id, u.id, m.id
       ORDER BY random()
       LIMIT 1
@@ -935,8 +959,12 @@ async function getAllEssays(filters = {}) {
   }
 
   if (filters.status !== null) {
-    values.push(filters.status || "published");
-    clauses.push(`e.status = $${values.length}`);
+    if (filters.status === "editable") {
+      clauses.push(`e.status <> 'submitted'`);
+    } else {
+      values.push(filters.status || "published");
+      clauses.push(`e.status = $${values.length}`);
+    }
   }
 
   if (filters.search) {
@@ -1030,8 +1058,12 @@ async function getPagedEssays(filters = {}, pagination = {}) {
   }
 
   if (filters.status !== null) {
-    values.push(filters.status || "published");
-    clauses.push(`e.status = $${values.length}`);
+    if (filters.status === "editable") {
+      clauses.push(`e.status <> 'submitted'`);
+    } else {
+      values.push(filters.status || "published");
+      clauses.push(`e.status = $${values.length}`);
+    }
   }
 
   if (filters.search) {
@@ -1129,8 +1161,12 @@ async function getEssayTags(filters = {}) {
   const clauses = [];
 
   if (filters.status !== null) {
-    values.push(filters.status || "published");
-    clauses.push(`e.status = $${values.length}`);
+    if (filters.status === "editable") {
+      clauses.push(`e.status <> 'submitted'`);
+    } else {
+      values.push(filters.status || "published");
+      clauses.push(`e.status = $${values.length}`);
+    }
   }
 
   if (filters.kind) {
@@ -1284,7 +1320,7 @@ async function insertPost(post) {
             created_at,
             updated_at
           )
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'published', $9, $10, $11)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         `,
         [
           post.id,
@@ -1295,6 +1331,7 @@ async function insertPost(post) {
           post.category,
           post.summary || "",
           mediaAssetId,
+          post.status || "published",
           post.publishedAt || null,
           post.createdAt || new Date().toISOString(),
           post.updatedAt || new Date().toISOString(),
@@ -1304,7 +1341,7 @@ async function insertPost(post) {
       await replacePoemLines(client, post.id, post.lines || []);
       await client.query("COMMIT");
 
-      return getPostById(post.id);
+      return getPostById(post.id, { status: null });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
@@ -1347,8 +1384,9 @@ async function updatePost(post) {
             category = $5,
             summary = $6,
             media_asset_id = $7,
-            published_at = $8,
-            updated_at = $9
+            status = $8,
+            published_at = $9,
+            updated_at = $10
           WHERE id = $1
         `,
         [
@@ -1359,6 +1397,7 @@ async function updatePost(post) {
           post.category,
           post.summary || "",
           mediaAssetId,
+          post.status || "published",
           post.publishedAt || null,
           post.updatedAt || new Date().toISOString(),
         ]
@@ -1367,7 +1406,7 @@ async function updatePost(post) {
       await replacePoemLines(client, post.id, post.lines || []);
       await client.query("COMMIT");
 
-      return getPostById(post.id);
+      return getPostById(post.id, { status: null });
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
