@@ -42,7 +42,7 @@ mkdir -p "$DB_BACKUP_LOCAL_DIR"
 
 timestamp="$(date '+%Y-%m-%dT%H-%M-%S')"
 year_month="$(date '+%Y/%m')"
-host_name="$(hostname -s | tr -cs '[:alnum:]._-@' '-')"
+host_name="$(hostname -s | tr -cs '[:alnum:].@_-' '-')"
 file_name="haiku-${host_name}-${timestamp}.dump"
 local_file="${DB_BACKUP_LOCAL_DIR%/}/${file_name}"
 s3_key="${DB_BACKUP_S3_PREFIX%/}/${year_month}/${file_name}"
@@ -83,4 +83,3 @@ if [[ "$DB_BACKUP_KEEP_LOCAL" != "true" ]]; then
   rm -f "$local_file"
   echo "Removed local backup file."
 fi
-
