@@ -132,7 +132,7 @@
 
 <script>
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import blogStore from "src/stores/blogStore";
 import { MOTION_PRESETS, animateGridEnterByRows, animatePanelIn, animatePanelOut, killMotion } from "src/utils/motion";
 
@@ -140,6 +140,7 @@ export default defineComponent({
   name: "AuthorPage",
   setup() {
     const route = useRoute();
+    const router = useRouter();
     const authorQuery = ref("");
     const otherAuthorsPage = ref(1);
     const authorSearchExpanded = ref(false);
@@ -160,6 +161,7 @@ export default defineComponent({
     const OTHER_AUTHORS_PAGE_SIZE = 12;
     const POEM_BATCH_SIZE = 9;
     let poemObserver = null;
+    let poemLoadVersion = 0;
     const syncViewportWidth = () => {
       if (typeof window !== "undefined") {
         viewportWidth.value = window.innerWidth;
@@ -173,8 +175,10 @@ export default defineComponent({
       attachPoemObserver();
     });
 
-    const fallbackSlug = computed(() => blogStore.state.authors[0]?.authorSlug || "basho");
-    const slug = computed(() => route.params.slug || fallbackSlug.value);
+    const fallbackSlug = computed(() => blogStore.state.authors[0]?.authorSlug || "");
+    const slug = computed(() =>
+      typeof route.params.slug === "string" ? route.params.slug : ""
+    );
     const poems = computed(() => pagedPoems.value);
     const hasMorePoems = computed(() => poemPage.value < poemTotalPages.value);
     const authorRecord = computed(() =>
@@ -278,7 +282,8 @@ export default defineComponent({
       return 3;
     });
     const loadPoemsPage = async ({ reset = false } = {}) => {
-      if (poemsLoading.value || !slug.value) {
+      const targetSlug = slug.value;
+      if (!targetSlug || (poemsLoading.value && !reset)) {
         return;
       }
 
@@ -290,14 +295,19 @@ export default defineComponent({
       poemsLoading.value = true;
       pageError.value = "";
       const previousCount = reset ? 0 : pagedPoems.value.length;
+      const requestVersion = ++poemLoadVersion;
 
       try {
         const data = await blogStore.fetchPagedPosts({
-          authorSlug: slug.value,
+          authorSlug: targetSlug,
           page: nextPage,
           pageSize: POEM_BATCH_SIZE,
           seed: authorPoemSeed.value,
         });
+
+        if (requestVersion !== poemLoadVersion || targetSlug !== slug.value) {
+          return;
+        }
 
         pagedPoems.value = reset
           ? data.items
@@ -308,11 +318,16 @@ export default defineComponent({
         poemsLoaded.value = true;
         await animatePoemBatch(previousCount);
       } catch (err) {
+        if (requestVersion !== poemLoadVersion || targetSlug !== slug.value) {
+          return;
+        }
         console.error("Không tải được bài của tác giả", err);
         pageError.value = "Không tải được danh sách bài viết của tác giả.";
       } finally {
-        poemsLoading.value = false;
-        attachPoemObserver();
+        if (requestVersion === poemLoadVersion) {
+          poemsLoading.value = false;
+          attachPoemObserver();
+        }
       }
     };
     const detachPoemObserver = () => {
@@ -359,8 +374,25 @@ export default defineComponent({
     });
 
     watch(
+      [() => route.params.slug, fallbackSlug],
+      ([routeSlug, nextFallback]) => {
+        if (typeof routeSlug === "string" && routeSlug.trim()) {
+          return;
+        }
+
+        if (!nextFallback) {
+          return;
+        }
+
+        router.replace(`/authors/${nextFallback}`);
+      },
+      { immediate: true }
+    );
+
+    watch(
       () => slug.value,
       async () => {
+        poemLoadVersion += 1;
         authorQuery.value = "";
         otherAuthorsPage.value = 1;
         authorSearchExpanded.value = false;
