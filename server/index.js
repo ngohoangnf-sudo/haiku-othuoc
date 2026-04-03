@@ -1655,8 +1655,23 @@ function normalizeEssayStatus(value, fallback = "published") {
 }
 
 function uniqueEssaySlug(title, preferredSlug, essayId = "") {
-  const base = slugify(preferredSlug || title || essayId || randomUUID());
-  return base || `essay-${randomUUID()}`;
+  const normalizedPreferredSlug = String(preferredSlug || "").trim();
+  const normalizedEssayId = String(essayId || "").trim();
+  const base = slugify(normalizedPreferredSlug || title || normalizedEssayId || randomUUID());
+  const shortId = normalizedEssayId
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase()
+    .slice(0, 8);
+
+  if (!base) {
+    return shortId ? `essay-${shortId}` : `essay-${randomUUID()}`;
+  }
+
+  if (normalizedPreferredSlug) {
+    return base;
+  }
+
+  return shortId && base !== shortId ? `${base}-${shortId}` : base;
 }
 
 function uniquePoemSlug(title, preferredSlug, poemId = "", lines = []) {
