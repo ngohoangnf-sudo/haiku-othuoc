@@ -59,6 +59,11 @@ async function loadAuthors() {
   return state.authors;
 }
 
+async function refreshAuthors() {
+  state.authors = [];
+  return loadAuthors();
+}
+
 async function fetchPagedPosts(options = {}) {
   const params = new URLSearchParams();
 
@@ -246,7 +251,7 @@ async function addPost(postInput) {
     }
     const data = await res.json();
     upsertPost(data, true);
-    state.authors = [];
+    await refreshAuthors();
     return data;
   } catch (err) {
     console.error("Không tạo được bài viết", err);
@@ -269,6 +274,7 @@ async function addEssay(essayInput) {
     const data = await res.json();
     upsertEssay(data, true);
     state.essaysStatus = data.status === "draft" ? "all" : state.essaysStatus;
+    await refreshAuthors();
     return data;
   } catch (err) {
     console.error("Không tạo được bài luận", err);
@@ -290,7 +296,7 @@ async function updatePost(id, postInput) {
     }
     const data = await res.json();
     upsertPost(data);
-    state.authors = [];
+    await refreshAuthors();
     return data;
   } catch (err) {
     console.error("Không cập nhật được bài viết", err);
@@ -312,6 +318,7 @@ async function updateEssay(slug, essayInput) {
     }
     const data = await res.json();
     upsertEssay(data);
+    await refreshAuthors();
     return data;
   } catch (err) {
     console.error("Không cập nhật được bài luận", err);
@@ -331,7 +338,7 @@ async function deletePost(id) {
       throw new Error(msg || `HTTP ${res.status}`);
     }
     state.posts = state.posts.filter((post) => post.id !== id);
-    state.authors = [];
+    await refreshAuthors();
   } catch (err) {
     console.error("Không xóa được bài viết", err);
     setError("Không xóa được bài viết, thử lại sau.");
@@ -350,6 +357,7 @@ async function deleteEssay(slug) {
       throw new Error(msg || `HTTP ${res.status}`);
     }
     state.essays = state.essays.filter((essay) => essay.slug !== slug);
+    await refreshAuthors();
   } catch (err) {
     console.error("Không xóa được bài luận", err);
     setEssaysError("Không xóa được bài luận, thử lại sau.");

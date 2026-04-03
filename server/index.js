@@ -3,7 +3,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const { randomUUID } = require("crypto");
-const { S3Client, PutObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require("@aws-sdk/client-s3");
 const { getSignedUrl } = require("@aws-sdk/s3-request-presigner");
 const { loadEnvFile } = require("./loadEnv");
 const {
@@ -31,6 +31,8 @@ const S3_UPLOAD_BUCKET = String(process.env.S3_UPLOAD_BUCKET || "").trim();
 const S3_UPLOAD_REGION = String(process.env.S3_UPLOAD_REGION || process.env.AWS_REGION || "").trim();
 const S3_UPLOAD_PREFIX = normalizeObjectKeyPrefix(process.env.S3_UPLOAD_PREFIX || "haiku-image");
 const MEDIA_PUBLIC_BASE = normalizeBaseUrl(process.env.MEDIA_PUBLIC_BASE || "");
+const MANAGED_MEDIA_URL_PREFIX =
+  MEDIA_PUBLIC_BASE && S3_UPLOAD_PREFIX ? `${MEDIA_PUBLIC_BASE}/${S3_UPLOAD_PREFIX}/` : "";
 const MEDIA_UPLOAD_MAX_BYTES = resolveMediaUploadMaxBytes(process.env.MEDIA_UPLOAD_MAX_MB);
 const MEDIA_UPLOAD_URL_TTL_SECONDS = 15 * 60;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
@@ -642,6 +644,10 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
           : null,
       updatedAt: new Date().toISOString(),
     });
+    const removedMediaSources = subtractMediaSources(
+      collectPoemMediaSources(existing),
+      collectPoemMediaSources(updated)
+    );
 
     await logActivity(req, {
       actorUserId: req.auth.user.id,
@@ -650,6 +656,7 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
       resourceId: updated.id,
       details: { title: updated.title, category: updated.category },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
     res.json(updated);
   } catch (err) {
     console.error("Lỗi cập nhật post", err);
@@ -660,6 +667,7 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
 app.delete("/api/posts/:id", requireEditor, async (req, res) => {
   try {
     const existing = await db.getPostById(req.params.id, { status: null });
+    const removedMediaSources = collectPoemMediaSources(existing);
     const deleted = await db.deletePost(req.params.id);
     if (!deleted) {
       return res.status(404).json({ message: "Không tìm thấy bài viết để xóa" });
@@ -672,6 +680,7 @@ app.delete("/api/posts/:id", requireEditor, async (req, res) => {
       resourceId: req.params.id,
       details: { title: existing?.title || "", category: existing?.category || "" },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
     res.status(204).end();
   } catch (err) {
     console.error("Lỗi xóa post", err);
@@ -871,6 +880,10 @@ app.put("/api/essays/:slug", requireEditor, async (req, res) => {
           : null,
       updatedAt: new Date().toISOString(),
     });
+    const removedMediaSources = subtractMediaSources(
+      collectEssayMediaSources(existing),
+      collectEssayMediaSources(updated)
+    );
 
     await logActivity(req, {
       actorUserId: req.auth.user.id,
@@ -879,6 +892,7 @@ app.put("/api/essays/:slug", requireEditor, async (req, res) => {
       resourceId: updated.id,
       details: { title: updated.title, slug: updated.slug },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
     res.json(updated);
   } catch (err) {
     console.error("Lỗi cập nhật essay", err);
@@ -893,6 +907,7 @@ app.delete("/api/essays/:slug", requireEditor, async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy bài luận để xóa" });
     }
 
+    const removedMediaSources = collectEssayMediaSources(existing);
     await db.deleteEssay(existing.id);
     await logActivity(req, {
       actorUserId: req.auth.user.id,
@@ -901,6 +916,7 @@ app.delete("/api/essays/:slug", requireEditor, async (req, res) => {
       resourceId: existing.id,
       details: { title: existing.title, slug: existing.slug },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
     res.status(204).end();
   } catch (err) {
     console.error("Lỗi xóa essay", err);
@@ -1836,6 +1852,151 @@ async function createPresignedMediaUpload({ fileName, contentType, scope, actorU
       "Content-Type": contentType,
     },
   };
+}
+
+function stripUrlQueryAndHash(value = "") {
+  const source = String(value || "").trim();
+  if (!source) {
+    return "";
+  }
+
+  try {
+    const url = new URL(source);
+    url.hash = "";
+    url.search = "";
+    return url.toString();
+  } catch (_error) {
+    return source.split("#")[0].split("?")[0];
+  }
+}
+
+function escapeRegExp(value = "") {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function normalizeMediaSourceValue(value = "") {
+  const source = String(value || "").trim();
+  if (!source) {
+    return "";
+  }
+
+  if (source.startsWith("http://") || source.startsWith("https://")) {
+    return stripUrlQueryAndHash(source);
+  }
+
+  return source;
+}
+
+function extractManagedMediaObjectKeyFromUrl(value = "") {
+  const normalized = normalizeMediaSourceValue(value);
+  if (!normalized || !MANAGED_MEDIA_URL_PREFIX) {
+    return "";
+  }
+
+  if (!normalized.startsWith(MANAGED_MEDIA_URL_PREFIX)) {
+    return "";
+  }
+
+  return normalized.slice(`${MEDIA_PUBLIC_BASE}/`.length);
+}
+
+function extractManagedMediaUrlsFromHtml(value = "") {
+  if (!MANAGED_MEDIA_URL_PREFIX) {
+    return [];
+  }
+
+  const source = String(value || "");
+  if (!source) {
+    return [];
+  }
+
+  const pattern = new RegExp(`${escapeRegExp(MANAGED_MEDIA_URL_PREFIX)}[^"'\\s<>()]+`, "g");
+  return [...new Set((source.match(pattern) || []).map((entry) => stripUrlQueryAndHash(entry)))];
+}
+
+function collectPoemMediaSources(post) {
+  const sources = new Set();
+  const image = normalizeMediaSourceValue(post?.image || "");
+  if (image) {
+    sources.add(image);
+  }
+  return [...sources];
+}
+
+function collectEssayMediaSources(essay) {
+  const sources = new Set();
+  const coverImage = normalizeMediaSourceValue(essay?.image || "");
+  if (coverImage) {
+    sources.add(coverImage);
+  }
+
+  extractManagedMediaUrlsFromHtml(essay?.body || "").forEach((source) => {
+    if (source) {
+      sources.add(source);
+    }
+  });
+
+  return [...sources];
+}
+
+function subtractMediaSources(previousSources = [], nextSources = []) {
+  const next = new Set(nextSources.map((source) => normalizeMediaSourceValue(source)).filter(Boolean));
+  return [...new Set(previousSources.map((source) => normalizeMediaSourceValue(source)).filter(Boolean))].filter(
+    (source) => !next.has(source)
+  );
+}
+
+async function deleteManagedMediaObjectByKey(objectKey = "") {
+  if (!objectKey || !S3_UPLOAD_BUCKET || !S3_UPLOAD_REGION) {
+    return false;
+  }
+
+  await getS3UploadClient().send(
+    new DeleteObjectCommand({
+      Bucket: S3_UPLOAD_BUCKET,
+      Key: objectKey,
+    })
+  );
+
+  return true;
+}
+
+async function cleanupUnusedMediaSources(sources = []) {
+  const uniqueSources = [...new Set((sources || []).map((source) => normalizeMediaSourceValue(source)).filter(Boolean))];
+
+  for (const source of uniqueSources) {
+    try {
+      const stillReferenced = await db.isMediaSourceReferenced(source);
+      if (stillReferenced) {
+        continue;
+      }
+
+      const managedObjectKey = extractManagedMediaObjectKeyFromUrl(source);
+      let canRemoveMediaAssetRows = true;
+
+      if (managedObjectKey) {
+        try {
+          await deleteManagedMediaObjectByKey(managedObjectKey);
+        } catch (error) {
+          canRemoveMediaAssetRows = false;
+          console.warn("Không xóa được object media trên S3", {
+            source,
+            key: managedObjectKey,
+            error: error?.message || error,
+          });
+        }
+      }
+
+      if (canRemoveMediaAssetRows) {
+        await db.deleteOrphanMediaAssetsBySource(source);
+      }
+    } catch (error) {
+      console.warn("Không dọn được media source cũ", {
+        source,
+        error: error?.message || error,
+      });
+    }
+  }
 }
 
 function resolveLocalMediaCandidates(assetPath = "") {

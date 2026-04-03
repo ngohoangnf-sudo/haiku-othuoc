@@ -27,7 +27,7 @@
       </header>
 
       <figure v-if="essay.image" class="essay-page__cover">
-        <img :src="resolveImage(essay.image)" :alt="essay.title" />
+        <img :src="resolveImage(essay.image)" :alt="essay.title" crossorigin="anonymous" />
       </figure>
 
       <section class="essay-page__body page-reading-copy" v-html="bodyHtml"></section>

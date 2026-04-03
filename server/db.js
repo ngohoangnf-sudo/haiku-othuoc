@@ -419,6 +419,75 @@ async function ensureMediaAsset(client, source, existingMediaAssetId = null) {
   return mediaId;
 }
 
+async function isMediaSourceReferenced(source) {
+  await init();
+
+  const normalizedSource = String(source || "").trim();
+  if (!normalizedSource) {
+    return false;
+  }
+
+  const result = await pool.query(
+    `
+      SELECT (
+        EXISTS (
+          SELECT 1
+          FROM media_assets m
+          WHERE m.source = $1
+            AND (
+              EXISTS (SELECT 1 FROM poems p WHERE p.media_asset_id = m.id)
+              OR EXISTS (SELECT 1 FROM essays e WHERE e.cover_media_id = m.id)
+              OR EXISTS (SELECT 1 FROM authors a WHERE a.avatar_media_id = m.id)
+            )
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM essays e_inline
+          WHERE e_inline.body LIKE '%' || $1 || '%'
+        )
+      ) AS referenced
+    `,
+    [normalizedSource]
+  );
+
+  return Boolean(result.rows[0]?.referenced);
+}
+
+async function deleteOrphanMediaAssetsBySource(source) {
+  await init();
+
+  const normalizedSource = String(source || "").trim();
+  if (!normalizedSource) {
+    return 0;
+  }
+
+  const result = await pool.query(
+    `
+      DELETE FROM media_assets m
+      WHERE m.source = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM poems p
+          WHERE p.media_asset_id = m.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM essays e
+          WHERE e.cover_media_id = m.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM authors a
+          WHERE a.avatar_media_id = m.id
+        )
+      RETURNING id
+    `,
+    [normalizedSource]
+  );
+
+  return result.rowCount || 0;
+}
+
 async function replacePoemLines(client, poemId, lines = []) {
   await client.query("DELETE FROM poem_lines WHERE poem_id = $1", [poemId]);
 
@@ -1926,6 +1995,8 @@ module.exports = {
   insertPost,
   updatePost,
   deletePost,
+  isMediaSourceReferenced,
+  deleteOrphanMediaAssetsBySource,
   getAuthors,
   getAllEssays,
   getPagedEssays,

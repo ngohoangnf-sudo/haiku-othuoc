@@ -22,7 +22,7 @@
           class="link w-inline-block --color-link"
         >
           <p v-for="(line, index) in featuredPoem.lines" :key="index" class="right">{{ line }}</p>
-          <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" />
+          <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" crossorigin="anonymous" />
         </a>
       </div>
     </div>

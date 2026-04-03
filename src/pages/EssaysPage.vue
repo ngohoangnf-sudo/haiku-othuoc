@@ -52,7 +52,7 @@
         <article v-for="essay in essays" :key="essay.id" ref="essayCards" class="essay-card">
           <router-link :to="`/essays/${essay.slug}`" class="essay-card__inner">
             <div v-if="essay.image" class="essay-card__cover">
-              <img :src="resolveImage(essay.image)" :alt="essay.title" />
+              <img :src="resolveImage(essay.image)" :alt="essay.title" crossorigin="anonymous" />
             </div>
             <div class="essay-card__body">
               <div class="essay-card__meta">
