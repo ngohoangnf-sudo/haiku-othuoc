@@ -71,9 +71,40 @@ export default defineComponent({
   setup(props, { emit }) {
     const imageInput = ref(null);
     const uploadingImage = ref(false);
+
+    const scrollSelectionWithinEditor = (view) => {
+      if (typeof window === "undefined") {
+        return false;
+      }
+
+      const scrollHost = view.dom?.closest?.(".rich-editor__content");
+      if (!(scrollHost instanceof HTMLElement)) {
+        return false;
+      }
+
+      const selection = view.state.selection;
+      const start = view.coordsAtPos(selection.from);
+      const end = view.coordsAtPos(selection.to);
+      const selectionTop = Math.min(start.top, end.top);
+      const selectionBottom = Math.max(start.bottom, end.bottom);
+      const hostRect = scrollHost.getBoundingClientRect();
+      const margin = 18;
+
+      if (selectionTop < hostRect.top + margin) {
+        scrollHost.scrollTop -= hostRect.top + margin - selectionTop;
+      } else if (selectionBottom > hostRect.bottom - margin) {
+        scrollHost.scrollTop += selectionBottom - (hostRect.bottom - margin);
+      }
+
+      return true;
+    };
+
     const editor = useEditor({
       content: normalizeEssayBodyHtml(props.modelValue),
       editable: !props.disabled,
+      editorProps: {
+        handleScrollToSelection: (view) => scrollSelectionWithinEditor(view),
+      },
       extensions: [
         StarterKit.configure({
           heading: {
@@ -312,11 +343,17 @@ export default defineComponent({
 
 .rich-editor__content {
   min-height: 20rem;
+  max-height: min(62vh, 36rem);
   border: 1px solid var(--surface-input-border);
   border-radius: 18px;
   background: var(--surface-input-bg);
   color: var(--color-text);
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-anchor: none;
+  cursor: text;
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
 }
 
 .rich-editor__content :deep(.tiptap) {
@@ -325,6 +362,20 @@ export default defineComponent({
   outline: none;
   font-size: 1rem;
   line-height: 1.7;
+  cursor: text;
+}
+
+.rich-editor__content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.rich-editor__content::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 999px;
+}
+
+.rich-editor__content::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .rich-editor__content :deep(.tiptap p) {
