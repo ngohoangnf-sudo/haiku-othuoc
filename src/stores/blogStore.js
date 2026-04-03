@@ -374,7 +374,7 @@ function getPostsByCategory(category = "jp") {
 }
 
 function getPostById(id) {
-  return state.posts.find((post) => post.id === id);
+  return state.posts.find((post) => post.id === id || post.slug === id);
 }
 
 function getEssayBySlug(slug) {

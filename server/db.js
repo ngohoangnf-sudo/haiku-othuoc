@@ -43,6 +43,28 @@ function slugify(value = "") {
     .replace(/(^-|-$)+/g, "");
 }
 
+function buildPoemSlug(title = "", poemId = "", firstLine = "", preferredSlug = "") {
+  const normalizedPreferredSlug = String(preferredSlug || "").trim();
+  const normalizedPoemId = String(poemId || "").trim();
+
+  if (!normalizedPreferredSlug && normalizedPoemId.startsWith("seed-")) {
+    return normalizedPoemId;
+  }
+
+  const base = slugify(normalizedPreferredSlug || title || firstLine || normalizedPoemId || randomUUID());
+  const shortId = normalizedPoemId.replace(/[^a-zA-Z0-9]/g, "").toLowerCase().slice(0, 8);
+
+  if (!base) {
+    return shortId ? `poem-${shortId}` : `poem-${randomUUID()}`;
+  }
+
+  if (normalizedPreferredSlug) {
+    return base;
+  }
+
+  return shortId && base !== shortId ? `${base}-${shortId}` : base;
+}
+
 function mapPoemRow(row) {
   return {
     id: row.id,
@@ -240,9 +262,48 @@ async function init() {
       CREATE INDEX IF NOT EXISTS idx_essays_created_by_user_id
         ON essays (created_by_user_id)
     `);
+
+    await backfillPoemSlugs();
   })();
 
   return initPromise;
+}
+
+async function backfillPoemSlugs() {
+  const result = await pool.query(
+    `
+      SELECT
+        p.id,
+        p.title,
+        p.slug,
+        COALESCE(
+          (
+            SELECT pl.content
+            FROM poem_lines pl
+            WHERE pl.poem_id = p.id
+            ORDER BY pl.line_number ASC
+            LIMIT 1
+          ),
+          ''
+        ) AS "firstLine"
+      FROM poems p
+      WHERE p.slug IS NULL OR BTRIM(p.slug) = ''
+      ORDER BY p.created_at ASC
+    `
+  );
+
+  for (const row of result.rows) {
+    const slug = buildPoemSlug(row.title, row.id, row.firstLine, row.slug);
+    await pool.query(
+      `
+        UPDATE poems
+        SET slug = $2
+        WHERE id = $1
+          AND (slug IS NULL OR BTRIM(slug) = '')
+      `,
+      [row.id, slug]
+    );
+  }
 }
 
 async function withClient(task) {
@@ -938,11 +999,11 @@ async function getPagedPosts(filters = {}, pagination = {}) {
   };
 }
 
-async function getPostById(id, options = { status: null }) {
+async function getPostById(idOrSlug, options = { status: null }) {
   await init();
 
-  const values = [id];
-  const clauses = ["p.id = $1"];
+  const values = [idOrSlug];
+  const clauses = ["(p.id = $1 OR p.slug = $1)"];
 
   if (options.status !== null) {
     values.push(options.status || "published");

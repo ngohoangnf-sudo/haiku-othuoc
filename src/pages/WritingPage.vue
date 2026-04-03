@@ -392,7 +392,7 @@ Một chút quà Edo"
                 >
                   Đăng bởi {{ poem.postedBy.displayName || poem.postedBy.username }}
                 </p>
-                <router-link :to="'/post/' + poem.id" class="write-page__preview-link">
+                <router-link :to="'/post/' + (poem.slug || poem.id)" class="write-page__preview-link">
                   Xem bài · {{ formatDate(poem.publishedAt) }}
                 </router-link>
               </div>

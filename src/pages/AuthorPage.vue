@@ -110,7 +110,7 @@
           </div>
           <div class="author-page__poem-meta">
             <p class="author-page__poem-date page-reading-copy">{{ formatDate(poem.publishedAt) }}</p>
-            <router-link :to="'/post/' + poem.id" class="author-page__poem-link">
+            <router-link :to="'/post/' + (poem.slug || poem.id)" class="author-page__poem-link">
               Xem bài
             </router-link>
           </div>

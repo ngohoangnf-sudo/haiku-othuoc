@@ -161,7 +161,7 @@ export default defineComponent({
         return;
       }
 
-      router.push(`/post/${poem.id}`);
+      router.push(`/post/${poem.slug || poem.id}`);
     };
 
     const destroyPoemRevealObserver = () => {

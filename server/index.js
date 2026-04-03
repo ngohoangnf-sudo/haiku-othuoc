@@ -555,13 +555,16 @@ app.post("/api/posts", submissionRateLimit, async (req, res) => {
       return res.status(400).json({ message: "Cần ít nhất một dòng haiku" });
     }
 
+    const postId = input.id || randomUUID();
     const now = new Date().toISOString();
     const status = canManagePosts
       ? normalizePoemStatus(input.status, "published")
       : "submitted";
+    const title = typeof input.title === "string" ? input.title.trim() : "";
     const post = {
-      id: input.id || randomUUID(),
-      title: typeof input.title === "string" ? input.title.trim() : "",
+      id: postId,
+      slug: uniquePoemSlug(title, input.slug, postId, lines),
+      title,
       author: input.author || "Vô danh",
       authorSlug: input.authorSlug || slugify(input.author || "vo-danh"),
       createdByUserId: canManagePosts ? req.auth.user.id : null,
@@ -613,6 +616,12 @@ app.put("/api/posts/:id", requireEditor, async (req, res) => {
     const updated = await db.updatePost({
       ...existing,
       id: existing.id,
+      slug: uniquePoemSlug(
+        typeof input.title === "string" ? input.title.trim() : existing.title,
+        input.slug || existing.slug,
+        existing.id,
+        lines
+      ),
       title: typeof input.title === "string" ? input.title.trim() : existing.title,
       author: typeof input.author === "string" && input.author.trim() ? input.author.trim() : existing.author,
       authorSlug:
@@ -1648,6 +1657,37 @@ function normalizeEssayStatus(value, fallback = "published") {
 function uniqueEssaySlug(title, preferredSlug, essayId = "") {
   const base = slugify(preferredSlug || title || essayId || randomUUID());
   return base || `essay-${randomUUID()}`;
+}
+
+function uniquePoemSlug(title, preferredSlug, poemId = "", lines = []) {
+  const normalizedPreferredSlug = String(preferredSlug || "").trim();
+  const normalizedPoemId = String(poemId || "").trim();
+  const firstLine =
+    Array.isArray(lines) && lines.length
+      ? String(lines[0] || "").trim()
+      : "";
+
+  if (!normalizedPreferredSlug && normalizedPoemId.startsWith("seed-")) {
+    return normalizedPoemId;
+  }
+
+  const base = slugify(
+    normalizedPreferredSlug || title || firstLine || normalizedPoemId || randomUUID()
+  );
+  const shortId = normalizedPoemId
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase()
+    .slice(0, 8);
+
+  if (!base) {
+    return shortId ? `poem-${shortId}` : `poem-${randomUUID()}`;
+  }
+
+  if (normalizedPreferredSlug) {
+    return base;
+  }
+
+  return shortId && base !== shortId ? `${base}-${shortId}` : base;
 }
 
 function normalizeRoutePrefix(value = "/media") {
