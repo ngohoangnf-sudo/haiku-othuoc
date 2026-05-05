@@ -21,6 +21,9 @@
           draggable="false"
           class="link w-inline-block --color-link"
         >
+          <p v-if="featuredPoem.title" class="right landing-page-light__poem-title">
+            {{ featuredPoem.title }}
+          </p>
           <p
             v-for="(line, index) in featuredPoem.lines"
             :key="index"
@@ -56,7 +59,7 @@
         <p>bình luận</p>
       </div>
     </div>
-    <div class="content__item" style="--aspect-ratio: 700/300">
+    <div class="content__item landing-page-light__section--haiku-other" style="--aspect-ratio: 700/300">
       <div class="content__item-imgwrap">
         <div
           class="content__item-img"
@@ -64,6 +67,11 @@
         ></div>
       </div>
       <h2 class="content__item-title content__item-title--layer">Haiku ≠</h2>
+      <div class="content__item-description landing-page-light__haiku-other-description">
+        <p>đa phương tiện</p>
+        <p>hình như haiku</p>
+        <p>AIku</p>
+      </div>
     </div>
     <div class="content__item" style="--aspect-ratio: 500/545">
       <div class="content__item-imgwrap">
@@ -131,6 +139,7 @@ export default defineComponent({
     return {
       cleanupLandingPage: null,
       featuredPoem: {
+        title: "",
         lines: ["đường phố không hắt bóng", "dưới mắt đèn đường hỏng", "chỗ trú loài chim đêm"],
         image: _7,
       },
@@ -158,6 +167,7 @@ export default defineComponent({
         }
 
         this.featuredPoem = {
+          title: data.title || "",
           lines: data.lines,
           image: resolveMediaUrl(data.image),
         };
@@ -182,6 +192,7 @@ body {
 </style>
 
 <style scoped>
+.landing-page-light__poem-title,
 .landing-page-light__poem-line {
   width: 100%;
   max-width: 100%;
@@ -189,5 +200,44 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.landing-page-light__poem-title {
+  margin-bottom: 0.85rem;
+  color: inherit;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.landing-page-light__section--haiku-other .landing-page-light__haiku-other-description {
+  position: absolute;
+  top: calc(100% + clamp(0.75rem, 1.7vw, 1.35rem));
+  right: clamp(0.55rem, 2.6vw, 1.8rem);
+  bottom: auto;
+  left: auto;
+  width: clamp(9rem, 16vw, 13rem);
+  padding: 0;
+  text-align: right;
+  transform: none;
+  z-index: 12;
+}
+
+.landing-page-light__section--haiku-other .landing-page-light__haiku-other-description p {
+  margin-left: auto;
+  margin-right: 0;
+  max-width: 100%;
+  text-align: right;
+}
+
+@media screen and (max-width: 53em) {
+  .landing-page-light__section--haiku-other .landing-page-light__haiku-other-description {
+    position: relative;
+    top: auto;
+    right: auto;
+    left: auto;
+    width: 100%;
+    padding: 1rem 1rem 0;
+    transform: none;
+  }
 }
 </style>

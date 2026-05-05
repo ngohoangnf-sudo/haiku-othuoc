@@ -547,9 +547,9 @@ function slugify(value = "") {
     .replace(/(^-|-$)+/g, "");
 }
 
-async function fetchEssayBySlug(slug) {
+async function fetchEssayBySlug(slug, options = {}) {
   const existing = getEssayBySlug(slug);
-  if (existing) return existing;
+  if (existing && !options.force) return existing;
 
   state.essaysLoading = true;
   setEssaysError("");
@@ -570,9 +570,9 @@ async function fetchEssayBySlug(slug) {
   }
 }
 
-async function fetchHaikuOtherPostBySlug(slug) {
+async function fetchHaikuOtherPostBySlug(slug, options = {}) {
   const existing = state.haikuOtherPosts.find((item) => item.slug === slug);
-  if (existing) return existing;
+  if (existing && !options.force) return existing;
 
   try {
     const res = await fetch(`${API_BASE}/haiku-other/${slug}`, {

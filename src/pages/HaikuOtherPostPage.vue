@@ -9,12 +9,12 @@
         <p class="haiku-other-page__eyebrow page-reading-copy">{{ formatCategory(post.category) }}</p>
         <h1 class="haiku-other-page__title page-reading-h2 page-heading-with-rule">{{ post.title }}</h1>
         <p v-if="post.summary" class="haiku-other-page__summary page-reading-copy">{{ post.summary }}</p>
-        <p v-if="post.publishedAt" class="haiku-other-page__meta page-reading-copy">{{ formatDate(post.publishedAt) }}</p>
+        <p class="haiku-other-page__meta page-reading-copy">
+          <span v-if="post.publishedAt">{{ formatDate(post.publishedAt) }}</span>
+          <span v-if="post.publishedAt && isAdmin && hasViewCount" aria-hidden="true"> · </span>
+          <span v-if="isAdmin && hasViewCount">{{ formatViewCount(post.viewCount) }}</span>
+        </p>
       </header>
-
-      <figure v-if="post.image" class="haiku-other-page__cover">
-        <img :src="resolveImage(post.image)" :alt="post.title" crossorigin="anonymous" />
-      </figure>
 
       <section
         ref="bodySection"
@@ -36,7 +36,8 @@ import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, w
 import { useRoute } from "vue-router";
 import * as THREE from "three";
 import blogStore from "src/stores/blogStore";
-import { API_BASE, resolveMediaUrl } from "src/utils/runtime";
+import authStore from "src/stores/authStore";
+import { API_BASE } from "src/utils/runtime";
 import { sanitizeHaikuOtherHtml } from "src/utils/essayContent";
 import { formatHaikuOtherCategory } from "src/utils/haikuOther";
 
@@ -496,13 +497,15 @@ export default defineComponent({
     const fetchCurrent = async () => {
       loading.value = true;
       try {
-        await blogStore.fetchHaikuOtherPostBySlug(route.params.slug);
+        await blogStore.fetchHaikuOtherPostBySlug(route.params.slug, { force: true });
       } finally {
         loading.value = false;
       }
     };
 
     const bodyHtml = computed(() => enhanceYouTubeEmbeds(sanitizeHaikuOtherHtml(post.value?.body || "")));
+    const isAdmin = computed(() => authStore.isAdmin());
+    const hasViewCount = computed(() => Number.isFinite(Number(post.value?.viewCount)));
 
     const destroyRippleEffect = (target) => {
       const effect = rippleEffects.get(target);
@@ -607,16 +610,20 @@ export default defineComponent({
         return value;
       }
     };
+    const formatViewCount = (value = 0) =>
+      `${new Intl.NumberFormat("vi-VN").format(Number(value) || 0)} lượt xem`;
 
     return {
       bodySection,
       post,
       loading,
       bodyHtml,
+      isAdmin,
+      hasViewCount,
       handleBodyClick,
       formatDate,
+      formatViewCount,
       formatCategory: formatHaikuOtherCategory,
-      resolveImage: resolveMediaUrl,
     };
   },
 });
@@ -662,19 +669,6 @@ export default defineComponent({
 .haiku-other-page__title {
   margin: 0;
   max-width: 13ch;
-}
-
-.haiku-other-page__cover {
-  margin: 0;
-  background: var(--surface-subtle-bg);
-}
-
-.haiku-other-page__cover img {
-  display: block;
-  width: 100%;
-  height: auto;
-  object-fit: contain;
-  filter: saturate(0.82) contrast(1.04);
 }
 
 .haiku-other-page__body {

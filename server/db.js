@@ -114,6 +114,7 @@ function mapEssayRow(row) {
       : null,
     tags: Array.isArray(row.tags) ? row.tags : [],
     status: row.status || "draft",
+    viewCount: Number(row.viewCount) || 0,
     publishedAt: row.publishedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -137,6 +138,7 @@ function mapHaikuOtherRow(row) {
         }
       : null,
     status: row.status || "draft",
+    viewCount: Number(row.viewCount) || 0,
     publishedAt: row.publishedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -262,6 +264,14 @@ async function init() {
     await pool.query(`
       ALTER TABLE essays
       ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'commentary'
+    `);
+    await pool.query(`
+      ALTER TABLE essays
+      ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0
+    `);
+    await pool.query(`
+      ALTER TABLE haiku_other_posts
+      ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0
     `);
     await pool.query(`
       UPDATE essays
@@ -1271,6 +1281,7 @@ async function getAllEssays(filters = {}) {
       e.published_at AS "publishedAt",
       e.created_at AS "createdAt",
       e.updated_at AS "updatedAt",
+      e.view_count AS "viewCount",
       COALESCE(a.display_name, e.pending_author_name, '') AS author,
       a.slug AS "authorSlug",
       e.pending_author_name AS "pendingAuthorName",
@@ -1357,6 +1368,7 @@ async function getPagedHaikuOtherPosts(filters = {}, pagination = {}) {
         h.published_at AS "publishedAt",
         h.created_at AS "createdAt",
         h.updated_at AS "updatedAt",
+        h.view_count AS "viewCount",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -1405,6 +1417,7 @@ async function getHaikuOtherPostBySlug(slug, filters = {}) {
         h.published_at AS "publishedAt",
         h.created_at AS "createdAt",
         h.updated_at AS "updatedAt",
+        h.view_count AS "viewCount",
         u.id AS "postedById",
         u.username AS "postedByUsername",
         u.display_name AS "postedByDisplayName",
@@ -1620,6 +1633,7 @@ async function getPagedEssays(filters = {}, pagination = {}) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
+        e.view_count AS "viewCount",
         COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
         e.pending_author_name AS "pendingAuthorName",
@@ -1719,6 +1733,7 @@ async function getEssayById(id) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
+        e.view_count AS "viewCount",
         COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
         e.pending_author_name AS "pendingAuthorName",
@@ -1772,6 +1787,7 @@ async function getEssayBySlug(slug, options = {}) {
         e.published_at AS "publishedAt",
         e.created_at AS "createdAt",
         e.updated_at AS "updatedAt",
+        e.view_count AS "viewCount",
         COALESCE(a.display_name, e.pending_author_name, '') AS author,
         a.slug AS "authorSlug",
         e.pending_author_name AS "pendingAuthorName",
@@ -2091,6 +2107,38 @@ async function deleteEssay(id) {
   return result.rowCount > 0;
 }
 
+async function incrementEssayViewCount(id) {
+  await init();
+
+  const result = await pool.query(
+    `
+      UPDATE essays
+      SET view_count = view_count + 1
+      WHERE id = $1
+      RETURNING view_count AS "viewCount"
+    `,
+    [id]
+  );
+
+  return Number(result.rows[0]?.viewCount) || 0;
+}
+
+async function incrementHaikuOtherViewCount(id) {
+  await init();
+
+  const result = await pool.query(
+    `
+      UPDATE haiku_other_posts
+      SET view_count = view_count + 1
+      WHERE id = $1
+      RETURNING view_count AS "viewCount"
+    `,
+    [id]
+  );
+
+  return Number(result.rows[0]?.viewCount) || 0;
+}
+
 async function deletePost(id) {
   await init();
   const result = await pool.query("DELETE FROM poems WHERE id = $1", [id]);
@@ -2289,11 +2337,13 @@ module.exports = {
   insertEssay,
   updateEssay,
   deleteEssay,
+  incrementEssayViewCount,
   getPagedHaikuOtherPosts,
   getHaikuOtherPostBySlug,
   insertHaikuOtherPost,
   updateHaikuOtherPost,
   deleteHaikuOtherPost,
+  incrementHaikuOtherViewCount,
   seedIfEmpty,
   seedPostsIfMissing,
   seedEssaysIfEmpty,

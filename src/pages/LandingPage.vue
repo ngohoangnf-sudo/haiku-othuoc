@@ -1,6 +1,9 @@
 <template>
   <div v-if="simpleMobileLayout" class="landing-page landing-page--mobile-minimal">
     <div class="landing-page__mobile-poem" aria-label="Bài thơ ngẫu nhiên">
+      <p v-if="featuredPoem.title" class="landing-page__mobile-title">
+        {{ featuredPoem.title }}
+      </p>
       <p
         v-for="(line, index) in featuredPoem.lines"
         :key="`mobile-line-${index}`"
@@ -35,6 +38,9 @@
           draggable="false"
           class="link w-inline-block -col-or-link landing-page__poem-link"
         >
+          <p v-if="featuredPoem.title" class="landing-page__poem-title">
+            {{ featuredPoem.title }}
+          </p>
           <p
             v-for="(line, index) in featuredPoem.lines"
             :key="index"
@@ -73,7 +79,11 @@
         <router-link :to="{ path: '/essays', query: { kind: 'commentary' } }" class="link"><p>bình luận</p></router-link>
       </div>
     </div>
-    <div class="content__item landing-page__section" style="--aspect-ratio: 700/300">
+    <div
+      class="content__item landing-page__section landing-page__section--haiku-other"
+      :class="{ 'landing-page__section--haiku-other-light': isLightTheme }"
+      style="--aspect-ratio: 700/300"
+    >
       <div class="content__item-imgwrap">
         <div
           class="content__item-img"
@@ -83,6 +93,14 @@
       <h2 class="content__item-title content__item-title--layer">
         <router-link to="/haiku-khac">Haiku ≠</router-link>
       </h2>
+      <div
+        class="content__item-description landing-page__haiku-other-description"
+        :style="haikuOtherDescriptionStyle"
+      >
+        <router-link :to="{ path: '/haiku-khac', query: { category: 'multimedia' } }" class="link"><p>đa phương tiện</p></router-link>
+        <router-link :to="{ path: '/haiku-khac', query: { category: 'haiku-like' } }" class="link"><p>hình như haiku</p></router-link>
+        <router-link :to="{ path: '/haiku-khac', query: { category: 'aiku' } }" class="link"><p>AIku</p></router-link>
+      </div>
     </div>
     <div class="content__item landing-page__section" style="--aspect-ratio: 500/545">
       <div class="content__item-imgwrap">
@@ -113,10 +131,13 @@ import _5 from "assets/5.jpg";
 import _7 from "assets/7.jpg";
 import { initLandingPage } from "assets/landing_page.js";
 import { API_BASE, resolveMediaUrl } from "src/utils/runtime";
+import themeStore from "src/stores/themeStore";
 
 export default defineComponent({
   name: "LandingPage",
   async mounted() {
+    this.syncDocumentTheme();
+    this.observeDocumentTheme();
     this.mobileMediaQuery = window.matchMedia?.("(max-width: 53em), (hover: none), (pointer: coarse)") ?? null;
     this.simpleMobileLayout = Boolean(this.mobileMediaQuery?.matches);
     this.syncMobileScrollLock();
@@ -129,6 +150,7 @@ export default defineComponent({
   },
   beforeUnmount() {
     this.cleanupLandingPage?.();
+    this.themeObserver?.disconnect();
     this.mobileMediaQuery?.removeEventListener?.("change", this.handleMediaQueryChange);
     document.documentElement.classList.remove("landing-page-mobile-lock");
     document.body.classList.remove("landing-page-mobile-lock");
@@ -158,8 +180,11 @@ export default defineComponent({
     return {
       cleanupLandingPage: null,
       mobileMediaQuery: null,
+      themeObserver: null,
+      currentDocumentTheme: "",
       simpleMobileLayout: false,
       featuredPoem: {
+        title: "",
         lines: ["đường phố không hắt bóng", "dưới mắt đèn đường hỏng", "chỗ trú loài chim đêm"],
         image: _7,
       },
@@ -173,7 +198,48 @@ export default defineComponent({
       },
     };
   },
+  computed: {
+    isLightTheme() {
+      return (this.currentDocumentTheme || themeStore.state.appliedTheme) === "light";
+    },
+    haikuOtherDescriptionStyle() {
+      if (!this.isLightTheme) {
+        return {};
+      }
+
+      return {
+        top: "calc(100% + clamp(0.75rem, 1.7vw, 1.35rem))",
+        right: "clamp(0.55rem, 2.6vw, 1.8rem)",
+        bottom: "auto",
+        left: "auto",
+        textAlign: "right",
+      };
+    },
+  },
   methods: {
+    syncDocumentTheme() {
+      this.currentDocumentTheme =
+        document.documentElement.dataset.theme || document.body.dataset.theme || "";
+    },
+    observeDocumentTheme() {
+      if (typeof MutationObserver === "undefined") {
+        return;
+      }
+
+      this.themeObserver = new MutationObserver(() => {
+        this.syncDocumentTheme();
+      });
+      this.themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["data-theme"],
+      });
+      if (document.body) {
+        this.themeObserver.observe(document.body, {
+          attributes: true,
+          attributeFilter: ["data-theme"],
+        });
+      }
+    },
     syncMobileScrollLock() {
       document.documentElement.classList.toggle("landing-page-mobile-lock", this.simpleMobileLayout);
       document.body.classList.toggle("landing-page-mobile-lock", this.simpleMobileLayout);
@@ -207,6 +273,7 @@ export default defineComponent({
         }
 
         this.featuredPoem = {
+          title: data.title || "",
           lines: data.lines,
           image: resolveMediaUrl(data.image),
         };
@@ -219,6 +286,66 @@ export default defineComponent({
 </script>
 
 <style scoped>
+.landing-page__poem-title,
+.landing-page__poem-line {
+  width: 20vw;
+  max-width: 100%;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.landing-page__poem-title {
+  margin-bottom: 0.85rem;
+  color: inherit;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.landing-page__section--haiku-other .landing-page__haiku-other-description {
+  position: absolute;
+  top: 61%;
+  right: calc(100% + clamp(0.2rem, 0.8vw, 0.7rem));
+  width: clamp(9rem, 16vw, 13rem);
+  padding: 0;
+  text-align: right;
+  transform: translateY(-50%);
+  z-index: 12;
+}
+
+.landing-page__section--haiku-other .landing-page__haiku-other-description .link {
+  align-items: flex-end;
+}
+
+.landing-page__section--haiku-other .landing-page__haiku-other-description p {
+  margin-left: auto;
+  margin-right: 0;
+  max-width: 100%;
+  text-align: right;
+}
+
+@media screen and (min-width: 53.01em) {
+  .landing-page__section--haiku-other-light .landing-page__haiku-other-description {
+    top: calc(100% + clamp(0.75rem, 1.7vw, 1.35rem)) !important;
+    right: clamp(0.55rem, 2.6vw, 1.8rem) !important;
+    bottom: auto !important;
+    left: auto !important;
+    text-align: right;
+    transform: none !important;
+  }
+
+  .landing-page__section--haiku-other-light .landing-page__haiku-other-description .link {
+    align-items: flex-end;
+  }
+
+  .landing-page__section--haiku-other-light .landing-page__haiku-other-description p {
+    margin-left: auto;
+    margin-right: 0;
+    text-align: right;
+  }
+}
+
 @media screen and (max-width: 53em) {
   .landing-page--mobile-minimal {
     display: grid;
@@ -252,6 +379,24 @@ export default defineComponent({
     filter: blur(1px);
     animation: landing-mobile-line-in 1180ms cubic-bezier(0.2, 0.7, 0.15, 1) forwards;
     animation-delay: calc(var(--line-index, 0) * 280ms + 320ms);
+  }
+
+  .landing-page__mobile-title {
+    margin: 0 0 0.48rem;
+    width: 100%;
+    max-width: 100%;
+    color: inherit;
+    font-style: normal;
+    font-weight: 700;
+    line-height: 1.36;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transform: translateY(0.85rem);
+    filter: blur(1px);
+    animation: landing-mobile-line-in 1120ms cubic-bezier(0.2, 0.7, 0.15, 1) forwards;
+    animation-delay: 120ms;
   }
 
   @keyframes landing-mobile-line-in {
@@ -389,6 +534,29 @@ export default defineComponent({
     margin-left: auto;
   }
 
+  .landing-page__section--haiku-other .landing-page__haiku-other-description {
+    position: relative;
+    top: auto;
+    right: auto;
+    width: 100%;
+    padding: 0.7rem 0 0;
+    transform: none !important;
+    grid-column: 1;
+    justify-self: stretch;
+    text-align: right;
+  }
+
+  .landing-page__section--haiku-other .landing-page__haiku-other-description .link {
+    align-items: flex-end;
+  }
+
+  .landing-page__section--haiku-other .landing-page__haiku-other-description p {
+    margin-left: auto;
+    margin-right: 0;
+    max-width: 100%;
+    text-align: right;
+  }
+
   .landing-page__section--hero .landing-page__poem {
     align-self: end;
   }
@@ -438,6 +606,7 @@ export default defineComponent({
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .landing-page__mobile-title,
   .landing-page__mobile-line {
     opacity: 1;
     transform: none;

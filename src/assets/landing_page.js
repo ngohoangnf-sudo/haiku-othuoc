@@ -135,7 +135,10 @@ class NativeParallaxItem {
       this.title.style.transform = `translate3d(0, ${this.current.titleY}px, 0)`;
     }
 
-    if (this.description) {
+    if (
+      this.description &&
+      !this.element.classList.contains("landing-page__section--haiku-other-light")
+    ) {
       this.description.style.transform = `translate3d(0, ${this.current.secondaryY}px, 0)`;
     }
 

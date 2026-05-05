@@ -61,6 +61,8 @@
                 <span v-if="essay.author">{{ essay.author }}</span>
                 <span v-if="essay.author && essay.publishedAt" aria-hidden="true">•</span>
                 <span v-if="essay.publishedAt">{{ formatDate(essay.publishedAt) }}</span>
+                <span v-if="canViewStats && hasViewCount(essay)" aria-hidden="true">•</span>
+                <span v-if="canViewStats && hasViewCount(essay)">{{ formatViewCount(essay.viewCount) }}</span>
               </div>
               <h2 class="essay-card__title">{{ essay.title }}</h2>
               <p class="essay-card__summary">{{ essay.summary || excerpt(essay.body) }}</p>
@@ -94,6 +96,7 @@ import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, w
 import { useRoute, useRouter } from "vue-router";
 import ElegantSelect from "components/ElegantSelect.vue";
 import blogStore from "src/stores/blogStore";
+import authStore from "src/stores/authStore";
 import { resolveMediaUrl } from "src/utils/runtime";
 import {
   MOTION_PRESETS,
@@ -129,6 +132,7 @@ export default defineComponent({
     const essayContentRegion = ref(null);
     const hasMoreEssays = computed(() => essayPage.value < essayTotalPages.value);
     const hasFilters = computed(() => Boolean(essayQuery.value.trim() || selectedTagSlug.value));
+    const canViewStats = computed(() => authStore.isAdmin());
     let essayLoadMoreObserver = null;
     let essaySearchTimer = null;
     let essayRequestId = 0;
@@ -316,6 +320,9 @@ export default defineComponent({
     };
 
     const formatKind = (value = "") => (value === "research" ? "Nghiên cứu" : "Bình luận");
+    const hasViewCount = (item) => Number.isFinite(Number(item?.viewCount));
+    const formatViewCount = (value = 0) =>
+      `${new Intl.NumberFormat("vi-VN").format(Number(value) || 0)} lượt xem`;
 
     const excerpt = (value = "") => {
       return excerptEssayContent(value, 180);
@@ -398,6 +405,9 @@ export default defineComponent({
       excerpt,
       formatDate,
       formatKind,
+      canViewStats,
+      hasViewCount,
+      formatViewCount,
       resolveImage: resolveMediaUrl,
     };
   },

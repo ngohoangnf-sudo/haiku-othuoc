@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS essays (
   body TEXT NOT NULL DEFAULT '',
   cover_media_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'draft',
+  view_count INTEGER NOT NULL DEFAULT 0,
   published_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS haiku_other_posts (
   body TEXT NOT NULL DEFAULT '',
   cover_media_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
   status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+  view_count INTEGER NOT NULL DEFAULT 0,
   published_at TIMESTAMPTZ,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

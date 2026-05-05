@@ -745,11 +745,14 @@ app.get("/api/essays", async (req, res) => {
         page: req.query.page,
         pageSize: req.query.pageSize,
       });
+      if (!canViewContentStats(req)) {
+        pagedEssays.items = pagedEssays.items.map(stripContentStats);
+      }
       return res.json(pagedEssays);
     }
 
     const essays = await db.getAllEssays(filters);
-    res.json(essays);
+    res.json(canViewContentStats(req) ? essays : essays.map(stripContentStats));
   } catch (err) {
     console.error("Lỗi lấy essays", err);
     res.status(500).json({ message: "Không lấy được danh sách bài luận" });
@@ -805,6 +808,9 @@ app.get("/api/haiku-other", async (req, res) => {
         pageSize: req.query.pageSize,
       }
     );
+    if (!canViewContentStats(req)) {
+      posts.items = posts.items.map(stripContentStats);
+    }
     res.json(posts);
   } catch (err) {
     console.error("Lỗi lấy Haiku Khác", err);
@@ -814,13 +820,17 @@ app.get("/api/haiku-other", async (req, res) => {
 
 app.get("/api/haiku-other/:slug", async (req, res) => {
   try {
+    const canViewStats = canViewContentStats(req);
     const post = await db.getHaikuOtherPostBySlug(req.params.slug, {
       status: ["editor", "admin"].includes(req.auth.role) ? null : "published",
     });
     if (!post) {
       return res.status(404).json({ message: "Không tìm thấy bài Haiku Khác" });
     }
-    res.json(post);
+    if (!["editor", "admin"].includes(req.auth.role) && post.status === "published") {
+      post.viewCount = await db.incrementHaikuOtherViewCount(post.id);
+    }
+    res.json(canViewStats ? post : stripContentStats(post));
   } catch (err) {
     console.error("Lỗi lấy bài Haiku Khác", err);
     res.status(500).json({ message: "Không lấy được bài Haiku Khác" });
@@ -958,13 +968,17 @@ app.delete("/api/haiku-other/:slug", requireEditor, async (req, res) => {
 
 app.get("/api/essays/:slug", async (req, res) => {
   try {
+    const canViewStats = canViewContentStats(req);
     const essay = await db.getEssayBySlug(req.params.slug, {
       status: ["editor", "admin"].includes(req.auth.role) ? null : "published",
     });
     if (!essay) {
       return res.status(404).json({ message: "Không tìm thấy bài luận" });
     }
-    res.json(essay);
+    if (!["editor", "admin"].includes(req.auth.role) && essay.status === "published") {
+      essay.viewCount = await db.incrementEssayViewCount(essay.id);
+    }
+    res.json(canViewStats ? essay : stripContentStats(essay));
   } catch (err) {
     console.error("Lỗi lấy essay", err);
     res.status(500).json({ message: "Không lấy được bài luận" });
@@ -2342,6 +2356,19 @@ function requireAdmin(req, res, next) {
   }
 
   next();
+}
+
+function canViewContentStats(req) {
+  return req.auth?.role === "admin";
+}
+
+function stripContentStats(content) {
+  if (!content || typeof content !== "object") {
+    return content;
+  }
+
+  const { viewCount, ...rest } = content;
+  return rest;
 }
 
 function sanitizeUser(user) {

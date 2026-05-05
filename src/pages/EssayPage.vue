@@ -23,6 +23,8 @@
           <span v-else-if="essay.author">{{ essay.author }}</span>
           <span v-if="essay.author && essay.publishedAt" aria-hidden="true">•</span>
           <span v-if="essay.publishedAt">{{ formatDate(essay.publishedAt) }}</span>
+          <span v-if="isAdmin && hasViewCount" aria-hidden="true">•</span>
+          <span v-if="isAdmin && hasViewCount">{{ formatViewCount(essay.viewCount) }}</span>
         </div>
       </header>
 
@@ -44,6 +46,7 @@
 import { computed, defineComponent, onMounted, watch } from "vue";
 import { useRoute } from "vue-router";
 import blogStore from "src/stores/blogStore";
+import authStore from "src/stores/authStore";
 import { resolveMediaUrl } from "src/utils/runtime";
 import { sanitizeEssayHtml } from "src/utils/essayContent";
 
@@ -55,7 +58,7 @@ export default defineComponent({
     const loading = computed(() => blogStore.state.essaysLoading);
 
     const fetchCurrent = async () => {
-      await blogStore.fetchEssayBySlug(route.params.slug);
+      await blogStore.fetchEssayBySlug(route.params.slug, { force: true });
     };
 
     onMounted(fetchCurrent);
@@ -65,6 +68,8 @@ export default defineComponent({
     );
 
     const bodyHtml = computed(() => sanitizeEssayHtml(essay.value?.body || ""));
+    const isAdmin = computed(() => authStore.isAdmin());
+    const hasViewCount = computed(() => Number.isFinite(Number(essay.value?.viewCount)));
 
     const formatDate = (value) => {
       if (!value) return "";
@@ -81,13 +86,18 @@ export default defineComponent({
     };
 
     const formatKind = (value = "") => (value === "research" ? "Nghiên cứu" : "Bình luận");
+    const formatViewCount = (value = 0) =>
+      `${new Intl.NumberFormat("vi-VN").format(Number(value) || 0)} lượt xem`;
 
     return {
       essay,
       loading,
       bodyHtml,
+      isAdmin,
+      hasViewCount,
       formatDate,
       formatKind,
+      formatViewCount,
       resolveImage: resolveMediaUrl,
     };
   },

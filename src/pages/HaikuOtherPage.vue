@@ -48,6 +48,8 @@
               <span>{{ formatCategory(post.category) }}</span>
               <span v-if="post.publishedAt" aria-hidden="true">•</span>
               <span v-if="post.publishedAt">{{ formatDate(post.publishedAt) }}</span>
+              <span v-if="canViewStats && hasViewCount(post)" aria-hidden="true">•</span>
+              <span v-if="canViewStats && hasViewCount(post)">{{ formatViewCount(post.viewCount) }}</span>
             </div>
             <h2 class="haiku-other-card__title">{{ post.title }}</h2>
             <p class="haiku-other-card__summary">{{ post.summary || excerpt(post.body) }}</p>
@@ -74,6 +76,7 @@
 import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import blogStore from "src/stores/blogStore";
+import authStore from "src/stores/authStore";
 import { resolveMediaUrl } from "src/utils/runtime";
 import { excerptEssayContent } from "src/utils/essayContent";
 import {
@@ -114,6 +117,7 @@ export default defineComponent({
       () => categoryOptions.find((item) => item.value === selectedCategory.value)?.description || ""
     );
     const hasMore = computed(() => page.value < totalPages.value);
+    const canViewStats = computed(() => authStore.isAdmin());
 
     const detachObserver = () => {
       observer?.disconnect();
@@ -241,6 +245,9 @@ export default defineComponent({
     };
 
     const excerpt = (value = "") => excerptEssayContent(value, 180);
+    const hasViewCount = (item) => Number.isFinite(Number(item?.viewCount));
+    const formatViewCount = (value = 0) =>
+      `${new Intl.NumberFormat("vi-VN").format(Number(value) || 0)} lượt xem`;
 
     onMounted(() => loadPostsPage({ reset: true }));
 
@@ -301,6 +308,9 @@ export default defineComponent({
       categoryOptions,
       excerpt,
       formatDate,
+      canViewStats,
+      hasViewCount,
+      formatViewCount,
       formatCategory: formatHaikuOtherCategory,
       resolveImage: resolveMediaUrl,
     };

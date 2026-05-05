@@ -637,6 +637,12 @@ Một chút quà Edo"
                 >
                   Đăng bởi {{ essay.postedBy.displayName || essay.postedBy.username }}
                 </p>
+                <p
+                  v-if="canViewStats && hasViewCount(essay)"
+                  class="write-page__preview-poster page-reading-copy"
+                >
+                  {{ formatViewCount(essay.viewCount) }}
+                </p>
                 <router-link :to="'/essays/' + essay.slug" class="write-page__preview-link">
                   Xem bài · {{ formatDate(essay.publishedAt) }}
                 </router-link>
@@ -758,6 +764,12 @@ Một chút quà Edo"
                   class="write-page__preview-poster page-reading-copy"
                 >
                   Đăng bởi {{ post.postedBy.displayName || post.postedBy.username }}
+                </p>
+                <p
+                  v-if="canViewStats && hasViewCount(post)"
+                  class="write-page__preview-poster page-reading-copy"
+                >
+                  {{ formatViewCount(post.viewCount) }}
                 </p>
                 <router-link :to="'/haiku-khac/' + post.slug" class="write-page__preview-link">
                   Xem bài · {{ formatDate(post.publishedAt) }}
@@ -1023,6 +1035,7 @@ export default defineComponent({
     );
     const error = computed(() => previewError.value || blogStore.state.error || blogStore.state.essaysError || blogStore.state.haikuOtherError);
     const canEdit = computed(() => authStore.canEdit());
+    const canViewStats = computed(() => authStore.isAdmin());
     const composerIntroText = computed(() =>
       canEdit.value
         ? "Chọn đăng haiku, nghiên cứu và bình luận, Haiku ≠, hoặc duyệt bài gửi."
@@ -2848,6 +2861,11 @@ export default defineComponent({
 
     const formatOtherStatus = (value = "") => (value === "draft" ? "Draft" : "Published");
 
+    const hasViewCount = (item) => Number.isFinite(Number(item?.viewCount));
+
+    const formatViewCount = (value = 0) =>
+      `${new Intl.NumberFormat("vi-VN").format(Number(value) || 0)} lượt xem`;
+
     const formatDate = (value) => {
       if (!value) return "";
       try {
@@ -2972,6 +2990,7 @@ export default defineComponent({
       otherPreviewStatusOptions,
       composerIntroText,
       canEdit,
+      canViewStats,
       categoryOptions,
       loading,
       error,
@@ -3013,6 +3032,8 @@ export default defineComponent({
       formatEssayStatus,
       formatOtherCategory,
       formatOtherStatus,
+      hasViewCount,
+      formatViewCount,
       excerptEssay,
       handleEssayBodyImageUploaded,
       handleEssayEditorError,
