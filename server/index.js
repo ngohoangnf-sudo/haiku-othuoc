@@ -141,6 +141,25 @@ app.get("/api/health", (_req, res) => {
   res.json({ status: "ok" });
 });
 
+app.get("/api/youtube-thumbnail/:videoId", async (req, res) => {
+  const videoId = normalizeYouTubeVideoId(req.params.videoId);
+  if (!videoId) {
+    return res.status(400).json({ message: "YouTube video id không hợp lệ" });
+  }
+
+  const maxResUrl = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/maxresdefault.jpg`;
+  const fallbackUrl = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+
+  try {
+    const response = await fetch(maxResUrl, { method: "HEAD" });
+    res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=604800");
+    return res.redirect(302, response.ok ? maxResUrl : fallbackUrl);
+  } catch (_error) {
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.redirect(302, fallbackUrl);
+  }
+});
+
 app.get("/api/auth/session", (req, res) => {
   if (!req.auth.user) {
     return res.json({
@@ -1780,6 +1799,11 @@ function slugify(value = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)+/g, "");
+}
+
+function normalizeYouTubeVideoId(value = "") {
+  const id = String(value || "").trim();
+  return /^[a-zA-Z0-9_-]{6,20}$/.test(id) ? id : "";
 }
 
 function resolveAuthorSlug(authorSlug, author) {

@@ -36,7 +36,7 @@ import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref, w
 import { useRoute } from "vue-router";
 import * as THREE from "three";
 import blogStore from "src/stores/blogStore";
-import { resolveMediaUrl } from "src/utils/runtime";
+import { API_BASE, resolveMediaUrl } from "src/utils/runtime";
 import { sanitizeHaikuOtherHtml } from "src/utils/essayContent";
 import { formatHaikuOtherCategory } from "src/utils/haikuOther";
 
@@ -91,12 +91,11 @@ function buildYouTubeEmbedSrc(videoId = "", autoplay = false) {
 function buildYouTubeCoverHtml({ videoId, title }) {
   const safeId = escapeHtmlAttribute(videoId);
   const safeTitle = escapeHtmlAttribute(title || "YouTube video");
-  const thumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/maxresdefault.jpg`;
-  const fallbackThumbnail = `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
+  const thumbnail = `${API_BASE}/youtube-thumbnail/${encodeURIComponent(videoId)}`;
 
   return `
     <button class="essay-youtube-cover" type="button" data-youtube-play="${safeId}" data-youtube-title="${safeTitle}" data-youtube-thumbnail="${thumbnail}" aria-label="Phát video: ${safeTitle}">
-      <img class="essay-youtube-cover__image" src="${thumbnail}" alt="" loading="lazy" onerror="this.onerror=null;this.src='${fallbackThumbnail}';this.closest('[data-youtube-thumbnail]')?.setAttribute('data-youtube-thumbnail','${fallbackThumbnail}')" />
+      <img class="essay-youtube-cover__image" src="${thumbnail}" alt="" loading="lazy" />
       <span class="essay-youtube-cover__veil" aria-hidden="true"></span>
       <span class="essay-youtube-cover__mark" aria-hidden="true">
         <svg class="essay-youtube-cover__triangle" viewBox="0 0 44 44" focusable="false">
