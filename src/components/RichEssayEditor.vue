@@ -837,12 +837,10 @@ export default defineComponent({
   width: min(100%, 44rem);
   max-width: 100%;
   margin: 1.4rem 0;
-  padding: clamp(0.45rem, 1.4vw, 0.8rem);
-  border: 1px solid rgb(var(--color-title-rgb) / 0.12);
-  background:
-    linear-gradient(145deg, rgb(var(--color-title-rgb) / 0.08), transparent 42%),
-    var(--surface-subtle-bg);
-  box-shadow: 0 18px 42px rgb(0 0 0 / 0.13);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .rich-editor__content :deep(.tiptap iframe) {
@@ -854,9 +852,7 @@ export default defineComponent({
   border: 0;
   margin: 1.2rem 0;
   background: var(--surface-subtle-bg);
-  box-shadow:
-    0 0 0 1px rgb(var(--color-title-rgb) / 0.12),
-    0 16px 34px rgb(0 0 0 / 0.12);
+  box-shadow: none;
 }
 
 .rich-editor__content :deep(.tiptap .essay-embed-frame iframe) {

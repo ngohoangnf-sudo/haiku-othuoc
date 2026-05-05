@@ -53,7 +53,13 @@ async function loadPosts(force = false) {
   return state.posts;
 }
 
+let authorsLoading = false;
+
 async function loadAuthors() {
+  if (state.authors.length) return state.authors;
+  if (authorsLoading) return state.authors;
+
+  authorsLoading = true;
   try {
     const res = await fetch(`${API_BASE}/authors`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -61,6 +67,8 @@ async function loadAuthors() {
     state.authors = Array.isArray(data) ? data : [];
   } catch (err) {
     console.error("Không tải được danh sách tác giả", err);
+  } finally {
+    authorsLoading = false;
   }
   return state.authors;
 }
