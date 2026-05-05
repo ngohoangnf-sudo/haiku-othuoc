@@ -120,6 +120,29 @@ function mapEssayRow(row) {
   };
 }
 
+function mapHaikuOtherRow(row) {
+  return {
+    id: row.id,
+    slug: row.slug,
+    title: row.title,
+    category: row.category || "multimedia",
+    summary: row.summary || "",
+    body: row.body || "",
+    image: row.image || "",
+    postedBy: row.postedById
+      ? {
+          id: row.postedById,
+          username: row.postedByUsername,
+          displayName: row.postedByDisplayName || row.postedByUsername || "",
+        }
+      : null,
+    status: row.status || "draft",
+    publishedAt: row.publishedAt,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
 function mapUserRow(row) {
   return {
     id: row.id,
@@ -261,6 +284,14 @@ async function init() {
     await pool.query(`
       CREATE INDEX IF NOT EXISTS idx_essays_created_by_user_id
         ON essays (created_by_user_id)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_haiku_other_category_status_published_at
+        ON haiku_other_posts (category, status, published_at DESC, created_at DESC)
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_haiku_other_created_by_user_id
+        ON haiku_other_posts (created_by_user_id)
     `);
 
     await backfillPoemSlugs();
@@ -437,6 +468,7 @@ async function isMediaSourceReferenced(source) {
             AND (
               EXISTS (SELECT 1 FROM poems p WHERE p.media_asset_id = m.id)
               OR EXISTS (SELECT 1 FROM essays e WHERE e.cover_media_id = m.id)
+              OR EXISTS (SELECT 1 FROM haiku_other_posts h WHERE h.cover_media_id = m.id)
               OR EXISTS (SELECT 1 FROM authors a WHERE a.avatar_media_id = m.id)
             )
         )
@@ -444,6 +476,11 @@ async function isMediaSourceReferenced(source) {
           SELECT 1
           FROM essays e_inline
           WHERE e_inline.body LIKE '%' || $1 || '%'
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM haiku_other_posts h_inline
+          WHERE h_inline.body LIKE '%' || $1 || '%'
         )
       ) AS referenced
     `,
@@ -474,6 +511,11 @@ async function deleteOrphanMediaAssetsBySource(source) {
           SELECT 1
           FROM essays e
           WHERE e.cover_media_id = m.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM haiku_other_posts h
+          WHERE h.cover_media_id = m.id
         )
         AND NOT EXISTS (
           SELECT 1
@@ -1259,6 +1301,237 @@ async function getAllEssays(filters = {}) {
   return result.rows.map(mapEssayRow);
 }
 
+async function getPagedHaikuOtherPosts(filters = {}, pagination = {}) {
+  await init();
+
+  const values = [];
+  const clauses = [];
+
+  if (filters.category) {
+    values.push(filters.category);
+    clauses.push(`h.category = $${values.length}`);
+  }
+
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`h.status = $${values.length}`);
+  }
+
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      h.title ILIKE $${values.length}
+      OR h.summary ILIKE $${values.length}
+      OR h.body ILIKE $${values.length}
+    )`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const pageSize = Math.max(1, Math.min(Number(pagination.pageSize) || 9, 100));
+  const page = Math.max(1, Number(pagination.page) || 1);
+
+  const countResult = await pool.query(
+    `
+      SELECT COUNT(*)::int AS total
+      FROM haiku_other_posts h
+      ${where}
+    `,
+    values
+  );
+
+  const total = countResult.rows[0]?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const safeOffset = (safePage - 1) * pageSize;
+
+  const itemsResult = await pool.query(
+    `
+      SELECT
+        h.id,
+        h.slug,
+        h.title,
+        h.category,
+        h.summary,
+        h.body,
+        h.status,
+        h.published_at AS "publishedAt",
+        h.created_at AS "createdAt",
+        h.updated_at AS "updatedAt",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
+        COALESCE(m.source, '') AS image
+      FROM haiku_other_posts h
+      LEFT JOIN users u ON u.id = h.created_by_user_id
+      LEFT JOIN media_assets m ON m.id = h.cover_media_id
+      ${where}
+      ORDER BY h.published_at DESC NULLS LAST, h.created_at DESC
+      LIMIT $${values.length + 1}
+      OFFSET $${values.length + 2}
+    `,
+    [...values, pageSize, safeOffset]
+  );
+
+  return {
+    items: itemsResult.rows.map(mapHaikuOtherRow),
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+  };
+}
+
+async function getHaikuOtherPostBySlug(slug, filters = {}) {
+  await init();
+
+  const values = [slug];
+  const clauses = ["h.slug = $1"];
+
+  if (filters.status !== null) {
+    values.push(filters.status || "published");
+    clauses.push(`h.status = $${values.length}`);
+  }
+
+  const result = await pool.query(
+    `
+      SELECT
+        h.id,
+        h.slug,
+        h.title,
+        h.category,
+        h.summary,
+        h.body,
+        h.status,
+        h.published_at AS "publishedAt",
+        h.created_at AS "createdAt",
+        h.updated_at AS "updatedAt",
+        u.id AS "postedById",
+        u.username AS "postedByUsername",
+        u.display_name AS "postedByDisplayName",
+        COALESCE(m.source, '') AS image
+      FROM haiku_other_posts h
+      LEFT JOIN users u ON u.id = h.created_by_user_id
+      LEFT JOIN media_assets m ON m.id = h.cover_media_id
+      WHERE ${clauses.join(" AND ")}
+      LIMIT 1
+    `,
+    values
+  );
+
+  return result.rows[0] ? mapHaikuOtherRow(result.rows[0]) : null;
+}
+
+async function insertHaikuOtherPost(post) {
+  await init();
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const mediaAssetId = await ensureMediaAsset(client, post.image);
+
+    await client.query(
+      `
+        INSERT INTO haiku_other_posts (
+          id,
+          slug,
+          title,
+          category,
+          summary,
+          body,
+          cover_media_id,
+          status,
+          published_at,
+          created_by_user_id,
+          created_at,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+      `,
+      [
+        post.id,
+        post.slug,
+        post.title,
+        post.category,
+        post.summary || "",
+        post.body || "",
+        mediaAssetId,
+        post.status || "draft",
+        post.publishedAt || null,
+        post.createdByUserId || null,
+        post.createdAt || new Date().toISOString(),
+        post.updatedAt || new Date().toISOString(),
+      ]
+    );
+
+    await client.query("COMMIT");
+    return getHaikuOtherPostBySlug(post.slug, { status: null });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function updateHaikuOtherPost(post) {
+  await init();
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const existing = await client.query(
+      "SELECT cover_media_id FROM haiku_other_posts WHERE id = $1",
+      [post.id]
+    );
+    const existingMediaAssetId = existing.rows[0]?.cover_media_id || null;
+    const mediaAssetId = await ensureMediaAsset(client, post.image, existingMediaAssetId);
+
+    await client.query(
+      `
+        UPDATE haiku_other_posts
+        SET
+          slug = $2,
+          title = $3,
+          category = $4,
+          summary = $5,
+          body = $6,
+          cover_media_id = $7,
+          status = $8,
+          published_at = $9,
+          updated_at = $10
+        WHERE id = $1
+      `,
+      [
+        post.id,
+        post.slug,
+        post.title,
+        post.category,
+        post.summary || "",
+        post.body || "",
+        mediaAssetId,
+        post.status || "draft",
+        post.publishedAt || null,
+        post.updatedAt || new Date().toISOString(),
+      ]
+    );
+
+    await client.query("COMMIT");
+    return getHaikuOtherPostBySlug(post.slug, { status: null });
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+async function deleteHaikuOtherPost(id) {
+  await init();
+
+  const result = await pool.query("DELETE FROM haiku_other_posts WHERE id = $1", [id]);
+  return result.rowCount || 0;
+}
+
 async function getPagedEssays(filters = {}, pagination = {}) {
   await init();
 
@@ -1934,12 +2207,12 @@ async function backfillCreatedByUserIfMissing(username = "") {
 
   const normalizedUsername = String(username || "").trim();
   if (!normalizedUsername) {
-    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0 };
+    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0, haikuOtherUpdated: 0 };
   }
 
   const user = await getUserByUsername(normalizedUsername);
   if (!user) {
-    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0 };
+    return { userFound: false, poemsUpdated: 0, essaysUpdated: 0, haikuOtherUpdated: 0 };
   }
 
   const poemsResult = await pool.query(
@@ -1960,10 +2233,20 @@ async function backfillCreatedByUserIfMissing(username = "") {
     [user.id]
   );
 
+  const haikuOtherResult = await pool.query(
+    `
+      UPDATE haiku_other_posts
+      SET created_by_user_id = $1
+      WHERE created_by_user_id IS NULL
+    `,
+    [user.id]
+  );
+
   return {
     userFound: true,
     poemsUpdated: poemsResult.rowCount || 0,
     essaysUpdated: essaysResult.rowCount || 0,
+    haikuOtherUpdated: haikuOtherResult.rowCount || 0,
     userId: user.id,
     username: user.username,
   };
@@ -2006,6 +2289,11 @@ module.exports = {
   insertEssay,
   updateEssay,
   deleteEssay,
+  getPagedHaikuOtherPosts,
+  getHaikuOtherPostBySlug,
+  insertHaikuOtherPost,
+  updateHaikuOtherPost,
+  deleteHaikuOtherPost,
   seedIfEmpty,
   seedPostsIfMissing,
   seedEssaysIfEmpty,

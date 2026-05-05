@@ -5,12 +5,14 @@ import authStore from "src/stores/authStore";
 const state = reactive({
   posts: [],
   essays: [],
+  haikuOtherPosts: [],
   essayTags: [],
   authors: [],
   loading: false,
   essaysLoading: false,
   error: "",
   essaysError: "",
+  haikuOtherError: "",
   loaded: false,
   essaysLoaded: false,
   essaysStatus: "published",
@@ -22,6 +24,10 @@ function setError(message = "") {
 
 function setEssaysError(message = "") {
   state.essaysError = message;
+}
+
+function setHaikuOtherError(message = "") {
+  state.haikuOtherError = message;
 }
 
 async function loadPosts(force = false) {
@@ -190,6 +196,48 @@ async function fetchPagedEssays(options = {}) {
   };
 }
 
+async function fetchPagedHaikuOtherPosts(options = {}) {
+  const params = new URLSearchParams();
+
+  if (options.category) {
+    params.set("category", options.category);
+  }
+
+  if (options.status) {
+    params.set("status", options.status);
+  }
+
+  if (options.search) {
+    params.set("search", options.search);
+  }
+
+  if (options.page !== undefined) {
+    params.set("page", String(options.page));
+  }
+
+  if (options.pageSize !== undefined) {
+    params.set("pageSize", String(options.pageSize));
+  }
+
+  const query = params.toString();
+  const res = await fetch(`${API_BASE}/haiku-other${query ? `?${query}` : ""}`, {
+    headers: authStore.getAuthHeaders(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+
+  const data = await res.json();
+  return {
+    items: Array.isArray(data?.items) ? data.items : [],
+    total: Number(data?.total) || 0,
+    totalPages: Math.max(1, Number(data?.totalPages) || 1),
+    page: Math.max(1, Number(data?.page) || 1),
+    pageSize: Math.max(1, Number(data?.pageSize) || Number(options.pageSize) || 1),
+  };
+}
+
 async function loadEssayTags(options = {}) {
   const status =
     typeof options === "object" && typeof options.status === "string" && options.status.trim()
@@ -283,6 +331,27 @@ async function addEssay(essayInput) {
   }
 }
 
+async function addHaikuOtherPost(postInput) {
+  try {
+    const res = await fetch(`${API_BASE}/haiku-other`, {
+      method: "POST",
+      headers: authStore.getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(postInput),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    upsertHaikuOtherPost(data, true);
+    return data;
+  } catch (err) {
+    console.error("Không tạo được bài Haiku Khác", err);
+    setHaikuOtherError("Không tạo được bài Haiku Khác, thử lại sau.");
+    throw err;
+  }
+}
+
 async function updatePost(id, postInput) {
   try {
     const res = await fetch(`${API_BASE}/posts/${id}`, {
@@ -327,6 +396,27 @@ async function updateEssay(slug, essayInput) {
   }
 }
 
+async function updateHaikuOtherPost(slug, postInput) {
+  try {
+    const res = await fetch(`${API_BASE}/haiku-other/${slug}`, {
+      method: "PUT",
+      headers: authStore.getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(postInput),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    upsertHaikuOtherPost(data);
+    return data;
+  } catch (err) {
+    console.error("Không cập nhật được bài Haiku Khác", err);
+    setHaikuOtherError("Không cập nhật được bài Haiku Khác, thử lại sau.");
+    throw err;
+  }
+}
+
 async function deletePost(id) {
   try {
     const res = await fetch(`${API_BASE}/posts/${id}`, {
@@ -365,6 +455,24 @@ async function deleteEssay(slug) {
   }
 }
 
+async function deleteHaikuOtherPost(slug) {
+  try {
+    const res = await fetch(`${API_BASE}/haiku-other/${slug}`, {
+      method: "DELETE",
+      headers: authStore.getAuthHeaders(),
+    });
+    if (!res.ok) {
+      const msg = await res.text();
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+    state.haikuOtherPosts = state.haikuOtherPosts.filter((post) => post.slug !== slug);
+  } catch (err) {
+    console.error("Không xóa được bài Haiku Khác", err);
+    setHaikuOtherError("Không xóa được bài Haiku Khác, thử lại sau.");
+    throw err;
+  }
+}
+
 function upsertPost(post, toTop = false) {
   const others = state.posts.filter((p) => p.id !== post.id);
   state.posts = toTop ? [post, ...others] : [...others, post];
@@ -375,6 +483,11 @@ function upsertEssay(essay, toTop = false) {
   const others = state.essays.filter((item) => item.slug !== essay.slug && item.id !== essay.id);
   state.essays = toTop ? [essay, ...others] : [...others, essay];
   state.essaysLoaded = true;
+}
+
+function upsertHaikuOtherPost(post, toTop = false) {
+  const others = state.haikuOtherPosts.filter((item) => item.slug !== post.slug && item.id !== post.id);
+  state.haikuOtherPosts = toTop ? [post, ...others] : [...others, post];
 }
 
 function getPostsByCategory(category = "jp") {
@@ -449,22 +562,46 @@ async function fetchEssayBySlug(slug) {
   }
 }
 
+async function fetchHaikuOtherPostBySlug(slug) {
+  const existing = state.haikuOtherPosts.find((item) => item.slug === slug);
+  if (existing) return existing;
+
+  try {
+    const res = await fetch(`${API_BASE}/haiku-other/${slug}`, {
+      headers: authStore.getAuthHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    upsertHaikuOtherPost(data);
+    return data;
+  } catch (err) {
+    console.error("Không tải được bài Haiku Khác", err);
+    setHaikuOtherError("Không tải được bài Haiku Khác từ máy chủ.");
+    return null;
+  }
+}
+
 export default {
   state,
   loadPosts,
   fetchPagedPosts,
   loadEssays,
   fetchPagedEssays,
+  fetchPagedHaikuOtherPosts,
   loadEssayTags,
   loadAuthors,
   addPost,
   addEssay,
+  addHaikuOtherPost,
   updatePost,
   updateEssay,
+  updateHaikuOtherPost,
   deletePost,
   deleteEssay,
+  deleteHaikuOtherPost,
   fetchPostById,
   fetchEssayBySlug,
+  fetchHaikuOtherPostBySlug,
   getPostById,
   getEssayBySlug,
   getPostsByAuthorSlug,

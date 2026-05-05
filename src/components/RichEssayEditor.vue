@@ -7,7 +7,7 @@
         class="rich-editor__tool"
         :class="{ 'rich-editor__tool--active': action.active?.() }"
         type="button"
-        :disabled="disabled || uploadingImage"
+        :disabled="disabled || uploadingImage || action.disabled?.()"
         @click="action.run"
       >
         {{ action.label }}
@@ -35,6 +35,8 @@
 </template>
 
 <script>
+import { Node, mergeAttributes } from "@tiptap/core";
+import Link from "@tiptap/extension-link";
 import { computed, defineComponent, onBeforeUnmount, ref, watch } from "vue";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
 import { TextSelection } from "@tiptap/pm/state";
@@ -44,6 +46,70 @@ import Placeholder from "@tiptap/extension-placeholder";
 import { normalizeEssayBodyHtml } from "src/utils/essayContent";
 
 const MAX_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+
+const IframeEmbed = Node.create({
+  name: "iframeEmbed",
+  group: "block",
+  atom: true,
+  draggable: true,
+
+  addAttributes() {
+    return {
+      src: {
+        default: "",
+      },
+      title: {
+        default: "Embedded media",
+      },
+      allow: {
+        default:
+          "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+      },
+    };
+  },
+
+  parseHTML() {
+    return [
+      {
+        tag: "iframe[src]",
+      },
+    ];
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      "figure",
+      { class: "essay-embed-frame", "data-embed-frame": "video" },
+      [
+        "iframe",
+        mergeAttributes(HTMLAttributes, {
+          loading: "lazy",
+          referrerpolicy: "no-referrer-when-downgrade",
+          sandbox: "allow-same-origin allow-scripts allow-popups allow-presentation",
+          allowfullscreen: "",
+          class: "essay-inline-embed",
+        }),
+      ],
+    ];
+  },
+});
+
+function extractEmbedSrc(value = "") {
+  const source = String(value || "").trim();
+  const iframeMatch = source.match(/<iframe[^>]+src=["']([^"']+)["'][^>]*>/i);
+  const candidate = iframeMatch?.[1] || source;
+
+  try {
+    const url = new URL(candidate);
+    if (url.protocol === "http:" || url.protocol === "https:") {
+      return url.toString();
+    }
+  } catch (_error) {
+    return "";
+  }
+
+  return "";
+}
 
 export default defineComponent({
   name: "RichEssayEditor",
@@ -67,11 +133,20 @@ export default defineComponent({
       type: Function,
       default: null,
     },
+    allowLinks: {
+      type: Boolean,
+      default: false,
+    },
+    allowEmbeds: {
+      type: Boolean,
+      default: false,
+    },
   },
   emits: ["update:modelValue", "image-uploaded", "error"],
   setup(props, { emit }) {
     const imageInput = ref(null);
     const uploadingImage = ref(false);
+    const editorStateVersion = ref(0);
     let storedMarksCleanupTimer = null;
 
     const clearStoredMarksIfSelectionPlain = (view) => {
@@ -179,6 +254,67 @@ export default defineComponent({
       return hasText && allTextMarked;
     };
 
+    const isLinkVisiblyActive = (instance) => {
+      const view = instance?.view;
+      const linkType = instance?.state?.schema?.marks?.link;
+      if (!view || !linkType) {
+        return false;
+      }
+
+      const { state } = view;
+      const { selection } = state;
+
+      if (selection.empty) {
+        return selection.$from.marks().some((mark) => mark.type === linkType);
+      }
+
+      let hasLink = false;
+      state.doc.nodesBetween(selection.from, selection.to, (node) => {
+        if (hasLink) {
+          return false;
+        }
+
+        if (node.isText && node.marks.some((mark) => mark.type === linkType)) {
+          hasLink = true;
+          return false;
+        }
+
+        return undefined;
+      });
+
+      return hasLink;
+    };
+
+    const getSelectedLinkHref = (instance) => {
+      const linkType = instance?.state?.schema?.marks?.link;
+      const selection = instance?.state?.selection;
+      if (!linkType || !selection) {
+        return "";
+      }
+
+      if (selection.empty) {
+        const mark = selection.$from.marks().find((item) => item.type === linkType);
+        return mark?.attrs?.href || "";
+      }
+
+      let href = "";
+      instance.state.doc.nodesBetween(selection.from, selection.to, (node) => {
+        if (href) {
+          return false;
+        }
+
+        const mark = node.marks?.find?.((item) => item.type === linkType);
+        if (mark?.attrs?.href) {
+          href = mark.attrs.href;
+          return false;
+        }
+
+        return undefined;
+      });
+
+      return href;
+    };
+
     const scrollSelectionWithinEditor = (view) => {
       if (typeof window === "undefined") {
         return false;
@@ -206,6 +342,43 @@ export default defineComponent({
       return true;
     };
 
+    const extensions = [
+      StarterKit.configure({
+        heading: {
+          levels: [2, 3],
+        },
+      }),
+      Image.configure({
+        inline: false,
+        allowBase64: true,
+        HTMLAttributes: {
+          class: "essay-inline-image",
+        },
+      }),
+      Placeholder.configure({
+        placeholder: props.placeholder,
+      }),
+    ];
+
+    if (props.allowLinks) {
+      extensions.push(
+        Link.configure({
+          openOnClick: false,
+          autolink: true,
+          linkOnPaste: true,
+          protocols: ["http", "https", "mailto"],
+          HTMLAttributes: {
+            rel: "noopener noreferrer",
+            target: "_blank",
+          },
+        })
+      );
+    }
+
+    if (props.allowEmbeds) {
+      extensions.push(IframeEmbed);
+    }
+
     const editor = useEditor({
       content: normalizeEssayBodyHtml(props.modelValue),
       editable: !props.disabled,
@@ -227,27 +400,13 @@ export default defineComponent({
           },
         },
       },
-      extensions: [
-        StarterKit.configure({
-          heading: {
-            levels: [2, 3],
-          },
-        }),
-        Image.configure({
-          inline: false,
-          allowBase64: true,
-          HTMLAttributes: {
-            class: "essay-inline-image",
-          },
-        }),
-        Placeholder.configure({
-          placeholder: props.placeholder,
-        }),
-      ],
+      extensions,
       onUpdate: ({ editor: editorInstance }) => {
+        editorStateVersion.value += 1;
         emit("update:modelValue", editorInstance.getHTML());
       },
       onSelectionUpdate: ({ editor: editorInstance }) => {
+        editorStateVersion.value += 1;
         scheduleStoredMarksCleanup(editorInstance.view);
       },
     });
@@ -277,6 +436,7 @@ export default defineComponent({
     );
 
     const toolbarActions = computed(() => {
+      editorStateVersion.value;
       const instance = editor.value;
       if (!instance) {
         return [];
@@ -325,6 +485,81 @@ export default defineComponent({
           active: () => false,
           run: () => instance.chain().focus().setHorizontalRule().run(),
         },
+        ...(props.allowLinks
+          ? [
+              {
+                key: "link",
+                label: "Thêm/Sửa link",
+                active: () => isLinkVisiblyActive(instance),
+                run: () => {
+                  const currentHref = getSelectedLinkHref(instance);
+                  const value = window.prompt("URL liên kết", currentHref);
+                  if (value === null) {
+                    return;
+                  }
+
+                  const href = value.trim();
+                  if (!href) {
+                    instance.chain().focus().extendMarkRange("link").unsetLink().run();
+                    return;
+                  }
+
+                  if (!/^(https?:\/\/|mailto:)/i.test(href)) {
+                    emit("error", "Link cần bắt đầu bằng http://, https:// hoặc mailto:");
+                    return;
+                  }
+
+                  instance.chain().focus().extendMarkRange("link").setLink({ href }).run();
+                },
+              },
+              {
+                key: "unlink",
+                label: "Gỡ link",
+                active: () => false,
+                disabled: () => !isLinkVisiblyActive(instance),
+                run: () => {
+                  instance.chain().focus().extendMarkRange("link").unsetLink().run();
+                },
+              },
+            ]
+          : []),
+        ...(props.allowEmbeds
+          ? [
+              {
+                key: "embed",
+                label: "Embed",
+                active: () => false,
+                run: () => {
+                  const value = window.prompt("Dán URL hoặc mã iframe");
+                  const src = extractEmbedSrc(value);
+                  if (!value) {
+                    return;
+                  }
+
+                  if (!src) {
+                    emit("error", "Embed cần có URL http:// hoặc https:// hợp lệ.");
+                    return;
+                  }
+
+                  instance
+                    .chain()
+                    .focus()
+                    .insertContent([
+                      {
+                        type: "iframeEmbed",
+                        attrs: {
+                          src,
+                        },
+                      },
+                      {
+                        type: "paragraph",
+                      },
+                    ])
+                    .run();
+                },
+              },
+            ]
+          : []),
       ];
     });
 
@@ -517,7 +752,9 @@ export default defineComponent({
 .rich-editor__content :deep(.tiptap p + h3),
 .rich-editor__content :deep(.tiptap ul + p),
 .rich-editor__content :deep(.tiptap blockquote + p),
-.rich-editor__content :deep(.tiptap img + p) {
+.rich-editor__content :deep(.tiptap img + p),
+.rich-editor__content :deep(.tiptap iframe + p),
+.rich-editor__content :deep(.tiptap .essay-embed-frame + p) {
   margin-top: 1rem;
 }
 
@@ -556,6 +793,35 @@ export default defineComponent({
   margin: 1.2rem 0;
 }
 
+.rich-editor__content :deep(.tiptap a) {
+  padding: 0.03em 0.16em 0.08em;
+  border-radius: 0.35em;
+  background:
+    linear-gradient(
+      180deg,
+      transparent 58%,
+      rgb(var(--color-title-rgb) / 0.14) 58%
+    );
+  color: var(--color-title);
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--color-title-rgb) / 0.48);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+.rich-editor__content :deep(.tiptap a:hover),
+.rich-editor__content :deep(.tiptap a:focus) {
+  background:
+    linear-gradient(
+      180deg,
+      transparent 48%,
+      rgb(var(--color-title-rgb) / 0.2) 48%
+    );
+  text-decoration-color: var(--color-title);
+}
+
 .rich-editor__content :deep(.tiptap img) {
   display: block;
   width: min(100%, 34rem);
@@ -564,6 +830,39 @@ export default defineComponent({
   border-radius: 14px;
   margin: 1.2rem 0;
   object-fit: contain;
+}
+
+.rich-editor__content :deep(.tiptap .essay-embed-frame) {
+  display: block;
+  width: min(100%, 44rem);
+  max-width: 100%;
+  margin: 1.4rem 0;
+  padding: clamp(0.45rem, 1.4vw, 0.8rem);
+  border: 1px solid rgb(var(--color-title-rgb) / 0.12);
+  background:
+    linear-gradient(145deg, rgb(var(--color-title-rgb) / 0.08), transparent 42%),
+    var(--surface-subtle-bg);
+  box-shadow: 0 18px 42px rgb(0 0 0 / 0.13);
+}
+
+.rich-editor__content :deep(.tiptap iframe) {
+  display: block;
+  width: min(100%, 42rem);
+  aspect-ratio: 16 / 9;
+  height: auto;
+  min-height: 14rem;
+  border: 0;
+  margin: 1.2rem 0;
+  background: var(--surface-subtle-bg);
+  box-shadow:
+    0 0 0 1px rgb(var(--color-title-rgb) / 0.12),
+    0 16px 34px rgb(0 0 0 / 0.12);
+}
+
+.rich-editor__content :deep(.tiptap .essay-embed-frame iframe) {
+  width: 100%;
+  margin: 0;
+  box-shadow: none;
 }
 
 .rich-editor__content :deep(.tiptap p.is-editor-empty:first-child::before) {

@@ -63,7 +63,7 @@
           :style="'background-image: url(' + images._4 + ')'"
         ></div>
       </div>
-      <h2 class="content__item-title content__item-title--layer">Haiku#</h2>
+      <h2 class="content__item-title content__item-title--layer">Haiku ≠</h2>
     </div>
     <div class="content__item" style="--aspect-ratio: 500/545">
       <div class="content__item-imgwrap">

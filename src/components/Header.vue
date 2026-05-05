@@ -12,7 +12,7 @@
       </div>
       <div class="page__nav-column page__nav-column--secondary" aria-label="Mục đang phát triển">
         <router-link to="/authors" class="link"><p>Tác giả</p></router-link>
-        <router-link to="/haiku-number" class="link"><p>Haiku #</p></router-link>
+        <router-link to="/haiku-khac" class="link"><p>Haiku ≠</p></router-link>
         <router-link to="/library" class="link"><p>Thư viện</p></router-link>
       </div>
     </nav>

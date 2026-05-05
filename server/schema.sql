@@ -105,6 +105,21 @@ CREATE TABLE IF NOT EXISTS essays (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS haiku_other_posts (
+  id TEXT PRIMARY KEY,
+  slug TEXT NOT NULL UNIQUE,
+  title TEXT NOT NULL,
+  category TEXT NOT NULL CHECK (category IN ('multimedia', 'haiku-like', 'aiku')),
+  summary TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  cover_media_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
+  status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
+  published_at TIMESTAMPTZ,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS essay_tags (
   id TEXT PRIMARY KEY,
   slug TEXT NOT NULL UNIQUE,
@@ -129,6 +144,12 @@ CREATE INDEX IF NOT EXISTS idx_poem_lines_poem_id
 
 CREATE INDEX IF NOT EXISTS idx_essays_status_published_at
   ON essays (status, published_at DESC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_haiku_other_category_status_published_at
+  ON haiku_other_posts (category, status, published_at DESC, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_haiku_other_created_by_user_id
+  ON haiku_other_posts (created_by_user_id);
 
 CREATE INDEX IF NOT EXISTS idx_users_role_status
   ON users (role, status);

@@ -65,16 +65,15 @@ const routes = [
 
   {
     path: "/haiku-number",
+    redirect: "/haiku-khac",
+  },
+
+  {
+    path: "/haiku-khac",
     component: () => import("layouts/MainLayout.vue"),
     children: [
-      {
-        path: "",
-        component: () => import("pages/ComingSoonPage.vue"),
-        meta: {
-          title: "Haiku #",
-          message: "Mục này đang được hoàn thiện. Coming soon.",
-        },
-      },
+      { path: "", component: () => import("pages/HaikuOtherPage.vue") },
+      { path: ":slug", component: () => import("pages/HaikuOtherPostPage.vue") },
     ],
   },
 

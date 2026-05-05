@@ -761,6 +761,182 @@ app.get("/api/essay-tags", async (req, res) => {
   }
 });
 
+app.get("/api/haiku-other", async (req, res) => {
+  try {
+    const requestedStatus = typeof req.query.status === "string" ? req.query.status.trim() : "";
+    const canManageContent = ["editor", "admin"].includes(req.auth.role);
+    const resolvedStatus = canManageContent
+      ? requestedStatus === "all"
+        ? null
+        : normalizeHaikuOtherStatus(requestedStatus || "published")
+      : "published";
+    const requestedCategory =
+      typeof req.query.category === "string" && req.query.category.trim()
+        ? normalizeHaikuOtherCategory(req.query.category)
+        : "";
+
+    const posts = await db.getPagedHaikuOtherPosts(
+      {
+        category: requestedCategory,
+        status: resolvedStatus,
+        search: req.query.search,
+      },
+      {
+        page: req.query.page,
+        pageSize: req.query.pageSize,
+      }
+    );
+    res.json(posts);
+  } catch (err) {
+    console.error("Lỗi lấy Haiku Khác", err);
+    res.status(500).json({ message: "Không lấy được danh sách Haiku Khác" });
+  }
+});
+
+app.get("/api/haiku-other/:slug", async (req, res) => {
+  try {
+    const post = await db.getHaikuOtherPostBySlug(req.params.slug, {
+      status: ["editor", "admin"].includes(req.auth.role) ? null : "published",
+    });
+    if (!post) {
+      return res.status(404).json({ message: "Không tìm thấy bài Haiku Khác" });
+    }
+    res.json(post);
+  } catch (err) {
+    console.error("Lỗi lấy bài Haiku Khác", err);
+    res.status(500).json({ message: "Không lấy được bài Haiku Khác" });
+  }
+});
+
+app.post("/api/haiku-other", requireEditor, async (req, res) => {
+  try {
+    const input = req.body || {};
+    const title = typeof input.title === "string" ? input.title.trim() : "";
+    const body = typeof input.body === "string" ? input.body.trim() : "";
+
+    if (!title) {
+      return res.status(400).json({ message: "Tiêu đề bài Haiku Khác là bắt buộc" });
+    }
+
+    if (!body) {
+      return res.status(400).json({ message: "Nội dung bài Haiku Khác là bắt buộc" });
+    }
+
+    const now = new Date().toISOString();
+    const status = normalizeHaikuOtherStatus(input.status, "published");
+    const postId = input.id || randomUUID();
+    const post = {
+      id: postId,
+      slug: uniqueHaikuOtherSlug(title, input.slug, postId),
+      title,
+      category: normalizeHaikuOtherCategory(input.category),
+      summary: typeof input.summary === "string" ? input.summary.trim() : "",
+      body,
+      image: typeof input.image === "string" ? input.image.trim() : "",
+      status,
+      publishedAt: status === "published" ? input.publishedAt || now : null,
+      createdByUserId: req.auth.user.id,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const created = await db.insertHaikuOtherPost(post);
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "haiku_other.create",
+      resourceType: "haiku_other",
+      resourceId: created.id,
+      details: { title: created.title, slug: created.slug, status: created.status },
+    });
+    res.status(201).json(created);
+  } catch (err) {
+    console.error("Lỗi tạo bài Haiku Khác", err);
+    res.status(500).json({ message: "Không tạo được bài Haiku Khác" });
+  }
+});
+
+app.put("/api/haiku-other/:slug", requireEditor, async (req, res) => {
+  try {
+    const existing = await db.getHaikuOtherPostBySlug(req.params.slug, { status: null });
+    if (!existing) {
+      return res.status(404).json({ message: "Không tìm thấy bài Haiku Khác để cập nhật" });
+    }
+
+    const input = req.body || {};
+    const nextTitle =
+      typeof input.title === "string" && input.title.trim()
+        ? input.title.trim()
+        : existing.title;
+    const nextBody =
+      typeof input.body === "string" && input.body.trim()
+        ? input.body.trim()
+        : existing.body;
+    const nextStatus = normalizeHaikuOtherStatus(input.status, existing.status);
+
+    const updated = await db.updateHaikuOtherPost({
+      ...existing,
+      id: existing.id,
+      slug: uniqueHaikuOtherSlug(nextTitle, input.slug || existing.slug, existing.id),
+      title: nextTitle,
+      category:
+        input.category !== undefined
+          ? normalizeHaikuOtherCategory(input.category, existing.category)
+          : existing.category,
+      summary:
+        typeof input.summary === "string" ? input.summary.trim() : existing.summary,
+      body: nextBody,
+      image: typeof input.image === "string" ? input.image.trim() : existing.image,
+      status: nextStatus,
+      publishedAt:
+        nextStatus === "published"
+          ? input.publishedAt || existing.publishedAt || new Date().toISOString()
+          : null,
+      updatedAt: new Date().toISOString(),
+    });
+    const removedMediaSources = subtractMediaSources(
+      collectHaikuOtherMediaSources(existing),
+      collectHaikuOtherMediaSources(updated)
+    );
+
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "haiku_other.update",
+      resourceType: "haiku_other",
+      resourceId: updated.id,
+      details: { title: updated.title, slug: updated.slug },
+    });
+    await cleanupUnusedMediaSources(removedMediaSources);
+    res.json(updated);
+  } catch (err) {
+    console.error("Lỗi cập nhật bài Haiku Khác", err);
+    res.status(500).json({ message: "Không cập nhật được bài Haiku Khác" });
+  }
+});
+
+app.delete("/api/haiku-other/:slug", requireEditor, async (req, res) => {
+  try {
+    const existing = await db.getHaikuOtherPostBySlug(req.params.slug, { status: null });
+    if (!existing) {
+      return res.status(404).json({ message: "Không tìm thấy bài Haiku Khác để xóa" });
+    }
+
+    const removedMediaSources = collectHaikuOtherMediaSources(existing);
+    await db.deleteHaikuOtherPost(existing.id);
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "haiku_other.delete",
+      resourceType: "haiku_other",
+      resourceId: existing.id,
+      details: { title: existing.title, slug: existing.slug },
+    });
+    await cleanupUnusedMediaSources(removedMediaSources);
+    res.status(204).end();
+  } catch (err) {
+    console.error("Lỗi xóa bài Haiku Khác", err);
+    res.status(500).json({ message: "Không xóa được bài Haiku Khác" });
+  }
+});
+
 app.get("/api/essays/:slug", async (req, res) => {
   try {
     const essay = await db.getEssayBySlug(req.params.slug, {
@@ -1670,6 +1846,31 @@ function normalizeEssayStatus(value, fallback = "published") {
   }
 }
 
+function normalizeHaikuOtherStatus(value, fallback = "published") {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  switch (normalized) {
+    case "draft":
+    case "published":
+      return normalized;
+    default:
+      return fallback;
+  }
+}
+
+function normalizeHaikuOtherCategory(value, fallback = "multimedia") {
+  const normalized = typeof value === "string" ? value.trim() : "";
+
+  switch (normalized) {
+    case "multimedia":
+    case "haiku-like":
+    case "aiku":
+      return normalized;
+    default:
+      return fallback;
+  }
+}
+
 function uniqueEssaySlug(title, preferredSlug, essayId = "") {
   const normalizedPreferredSlug = String(preferredSlug || "").trim();
   const normalizedEssayId = String(essayId || "").trim();
@@ -1681,6 +1882,26 @@ function uniqueEssaySlug(title, preferredSlug, essayId = "") {
 
   if (!base) {
     return shortId ? `essay-${shortId}` : `essay-${randomUUID()}`;
+  }
+
+  if (normalizedPreferredSlug) {
+    return base;
+  }
+
+  return shortId && base !== shortId ? `${base}-${shortId}` : base;
+}
+
+function uniqueHaikuOtherSlug(title, preferredSlug, postId = "") {
+  const normalizedPreferredSlug = String(preferredSlug || "").trim();
+  const normalizedPostId = String(postId || "").trim();
+  const base = slugify(normalizedPreferredSlug || title || normalizedPostId || randomUUID());
+  const shortId = normalizedPostId
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .toLowerCase()
+    .slice(0, 8);
+
+  if (!base) {
+    return shortId ? `haiku-khac-${shortId}` : `haiku-khac-${randomUUID()}`;
   }
 
   if (normalizedPreferredSlug) {
@@ -1781,6 +2002,10 @@ function normalizeMediaUploadScope(value = "") {
       return "essays/covers";
     case "essay-inline":
       return "essays/inline";
+    case "haiku-other-cover":
+      return "haiku-other/covers";
+    case "haiku-other-inline":
+      return "haiku-other/inline";
     case "submission-cover":
       return "submissions/covers";
     case "submission-inline":
@@ -1931,6 +2156,22 @@ function collectEssayMediaSources(essay) {
   }
 
   extractManagedMediaUrlsFromHtml(essay?.body || "").forEach((source) => {
+    if (source) {
+      sources.add(source);
+    }
+  });
+
+  return [...sources];
+}
+
+function collectHaikuOtherMediaSources(post) {
+  const sources = new Set();
+  const coverImage = normalizeMediaSourceValue(post?.image || "");
+  if (coverImage) {
+    sources.add(coverImage);
+  }
+
+  extractManagedMediaUrlsFromHtml(post?.body || "").forEach((source) => {
     if (source) {
       sources.add(source);
     }

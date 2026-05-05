@@ -25,7 +25,7 @@
         <div
           ref="composerModeSwitch"
           class="write-page__mode-switch"
-          :class="{ 'write-page__mode-switch--triad': canEdit }"
+          :class="{ 'write-page__mode-switch--quad': canEdit }"
           role="tablist"
           aria-label="Chọn loại nội dung"
         >
@@ -44,6 +44,15 @@
             @click="chooseComposer('essay')"
           >
             <span class="write-page__mode-tab-label">Nghiên cứu và bình luận</span>
+          </button>
+          <button
+            v-if="canEdit"
+            class="write-page__mode-tab"
+            :class="{ 'write-page__mode-tab--active': activeComposer === 'other' }"
+            type="button"
+            @click="chooseComposer('other')"
+          >
+            <span class="write-page__mode-tab-label">Khác</span>
           </button>
           <button
             class="write-page__mode-tab"
@@ -320,6 +329,109 @@ Một chút quà Edo"
           </div>
           <p v-if="essayMessage" class="form-feedback page-reading-copy">{{ essayMessage }}</p>
         </form>
+
+        <form v-show="showOtherComposer" ref="otherComposerPanel" class="write-form" @submit.prevent="submitOtherPost">
+          <div class="write-form__essay-head">
+            <label class="form-field">
+              <span class="form-field__label">Tiêu đề</span>
+              <input v-model="otherForm.title" class="input" placeholder="Tên bài trong mục Haiku ≠" />
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Mục</span>
+              <ElegantSelect
+                v-model="otherForm.category"
+                :options="haikuOtherCategoryOptions"
+                aria-label="Phân loại bài Haiku ≠"
+              />
+            </label>
+            <label class="form-field">
+              <span class="form-field__label">Trạng thái</span>
+              <ElegantSelect
+                v-model="otherForm.status"
+                :options="[
+                  { value: 'draft', label: 'Draft' },
+                  { value: 'published', label: 'Published' },
+                ]"
+                aria-label="Trạng thái bài Haiku ≠"
+              />
+            </label>
+          </div>
+          <label class="form-field form-field--wide">
+            <span class="form-field__label">Tóm tắt</span>
+            <input v-model="otherForm.summary" class="input" placeholder="Một đoạn ngắn dẫn vào bài" />
+          </label>
+          <label class="form-field">
+            <span class="form-field__label">URL ảnh bìa (tùy chọn)</span>
+            <input v-model="otherForm.image" class="input" placeholder="https://... hoặc data URL" />
+          </label>
+          <label class="form-field">
+            <span class="form-field__label form-field__label--with-tooltip">
+              <span>Tải ảnh trực tiếp (tùy chọn)</span>
+              <span class="form-field__tooltip-wrap">
+                <span class="form-field__tooltip-trigger" aria-hidden="true">?</span>
+                <span class="form-field__tooltip">
+                  Chấp nhận PNG, JPG, WEBP dưới 5MB. Nếu đã có URL ảnh hoặc ảnh cũ, bạn vẫn có thể giữ nguyên.
+                </span>
+              </span>
+            </span>
+            <div class="upload-field" :class="{ 'upload-field--filled': Boolean(otherForm.image) }">
+              <input
+                ref="otherImageInput"
+                class="upload-field__input"
+                type="file"
+                accept="image/*"
+                @change="handleImageUpload($event, 'other')"
+              />
+              <div class="upload-field__main">
+                <span class="upload-field__title">
+                  {{ otherUploadedImageName ? "Ảnh bìa đã được tải lên" : otherForm.image ? "Đang dùng ảnh bìa hiện tại" : "Chưa chọn ảnh bìa" }}
+                </span>
+                <span v-if="otherUploadedImageName || otherForm.image" class="upload-field__meta">
+                  {{ otherUploadedImageName || "Có thể là URL ảnh hoặc ảnh đã lưu trước đó" }}
+                </span>
+              </div>
+              <div class="upload-field__actions">
+                <button class="upload-field__button" type="button" @click="openImagePicker('other')">
+                  {{ otherForm.image ? "Đổi ảnh" : "Chọn ảnh" }}
+                </button>
+                <button
+                  v-if="otherForm.image"
+                  class="upload-field__button upload-field__button--ghost"
+                  type="button"
+                  @click="clearImage('other')"
+                >
+                  Bỏ ảnh
+                </button>
+              </div>
+            </div>
+          </label>
+          <div class="form-field form-field--wide">
+            <span class="form-field__label">Nội dung bài</span>
+            <RichEssayEditor
+              v-model="otherForm.body"
+              placeholder="Viết bài Haiku ≠ ở đây. Có thể chèn link hoặc iframe/video."
+              :upload-image="uploadOtherBodyImage"
+              allow-links
+              allow-embeds
+              @image-uploaded="handleOtherBodyImageUploaded"
+              @error="handleOtherEditorError"
+            />
+          </div>
+          <div class="write-form__actions">
+            <button class="submit-btn" type="submit">
+              {{ editingOtherSlug ? "Lưu chỉnh sửa" : "Đăng bài Haiku ≠" }}
+            </button>
+            <button
+              v-if="editingOtherSlug"
+              class="submit-btn submit-btn--ghost"
+              type="button"
+              @click="cancelOtherEditing"
+            >
+              Hủy chỉnh sửa
+            </button>
+          </div>
+          <p v-if="otherMessage" class="form-feedback page-reading-copy">{{ otherMessage }}</p>
+        </form>
         </div>
       </div>
     </section>
@@ -583,6 +695,116 @@ Một chút quà Edo"
         </button>
       </div>
     </section>
+
+    <section
+      v-if="canEdit && (activeComposer === 'other' || showOtherPreviews)"
+      ref="otherPreviewSection"
+      class="write-page__previews write-page__previews--other"
+    >
+      <div class="write-page__previews-head">
+        <div class="write-page__previews-head-top">
+          <h2 class="write-page__subheading page-reading-h3">Haiku ≠</h2>
+          <div class="write-page__preview-tools">
+            <label class="write-page__preview-search">
+              <span class="write-page__preview-search-icon" aria-hidden="true">⌕</span>
+              <input
+                v-model.trim="otherPreviewQuery"
+                type="search"
+                class="write-page__preview-search-input"
+                placeholder="Tìm kiếm"
+                aria-label="Tìm bài Haiku ≠"
+              />
+            </label>
+            <label class="write-page__preview-filter">
+              <span class="write-page__preview-filter-label">Mục</span>
+              <ElegantSelect
+                v-model="otherPreviewCategory"
+                class="write-page__preview-filter-select"
+                :options="otherPreviewCategoryOptions"
+                aria-label="Lọc Haiku ≠ theo mục"
+              />
+            </label>
+            <label class="write-page__preview-filter">
+              <span class="write-page__preview-filter-label">Trạng thái</span>
+              <ElegantSelect
+                v-model="otherPreviewStatus"
+                class="write-page__preview-filter-select"
+                :options="otherPreviewStatusOptions"
+                aria-label="Lọc Haiku ≠ theo trạng thái"
+              />
+            </label>
+          </div>
+        </div>
+        <p class="write-page__subcopy page-reading-copy">{{ previewOtherTotal }} bài</p>
+      </div>
+
+      <div v-if="visibleOtherPosts.length" class="write-page__preview-carousel-shell">
+        <div ref="otherPreviewList" :class="['write-page__preview-list', 'write-page__preview-list--essays']">
+          <article
+            v-for="post in visibleOtherPosts"
+            :key="`other-${previewOtherPage}-${post.id}`"
+            class="write-page__preview write-page__preview--essay"
+            :class="{ 'write-page__preview--active': editingOtherSlug === post.slug && activeComposer === 'other' }"
+          >
+            <p class="write-page__preview-title">{{ post.title }}</p>
+            <p class="write-page__essay-meta-line page-reading-copy">
+              {{ formatOtherCategory(post.category) }} · {{ formatOtherStatus(post.status) }}
+            </p>
+            <p class="write-page__essay-summary page-reading-copy">{{ post.summary || excerptEssay(post.body) }}</p>
+            <div class="write-page__preview-footer">
+              <div class="write-page__preview-meta">
+                <p
+                  v-if="post.postedBy"
+                  class="write-page__preview-poster page-reading-copy"
+                >
+                  Đăng bởi {{ post.postedBy.displayName || post.postedBy.username }}
+                </p>
+                <router-link :to="'/haiku-khac/' + post.slug" class="write-page__preview-link">
+                  Xem bài · {{ formatDate(post.publishedAt) }}
+                </router-link>
+              </div>
+              <div class="write-page__preview-actions">
+                <button class="write-page__preview-action" type="button" @click="startEditingOtherPost(post)">
+                  {{ editingOtherSlug === post.slug && activeComposer === 'other' ? "Đang sửa" : "Sửa" }}
+                </button>
+                <button class="write-page__preview-action write-page__preview-action--danger" type="button" @click="removeOtherPost(post)">
+                  Xóa
+                </button>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+      <p
+        v-else-if="!previewOtherLoading"
+        class="write-page__preview-empty page-reading-copy"
+      >
+        Không tìm thấy bài Haiku ≠ phù hợp.
+      </p>
+      <div v-if="showOtherPreviewPagination" class="write-page__pagination">
+        <button
+          class="write-page__pagination-btn"
+          type="button"
+          :disabled="previewOtherPage <= 1"
+          @click="changeOtherPreviewPage(previewOtherPage - 1)"
+          aria-label="Trang Haiku ≠ trước"
+        >
+          &lt;
+        </button>
+        <p class="write-page__pagination-label page-reading-copy">
+          {{ otherPreviewPaginationLabel }}
+        </p>
+        <button
+          class="write-page__pagination-btn"
+          type="button"
+          :disabled="previewOtherPage >= previewOtherTotalPages"
+          @click="changeOtherPreviewPage(previewOtherPage + 1)"
+          aria-label="Trang Haiku ≠ sau"
+        >
+          &gt;
+        </button>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -603,7 +825,18 @@ import {
   animatePanelOut,
   killMotion,
 } from "src/utils/motion";
-import { excerptEssayContent, sanitizeEssayHtml, stripEssayText } from "src/utils/essayContent";
+import {
+  excerptEssayContent,
+  hasHaikuOtherContent,
+  sanitizeEssayHtml,
+  sanitizeHaikuOtherHtml,
+  stripEssayText,
+} from "src/utils/essayContent";
+import {
+  HAIKU_OTHER_CATEGORIES,
+  formatHaikuOtherCategory,
+  normalizeHaikuOtherCategory,
+} from "src/utils/haikuOther";
 import { uploadImageToMediaStore } from "src/utils/mediaUpload";
 
 const CATEGORY_OPTIONS = [
@@ -615,10 +848,12 @@ const CATEGORY_OPTIONS = [
 const DRAFT_STORAGE_KEYS = {
   poem: "haiku.write.poemDraft",
   essay: "haiku.write.essayDraft",
+  other: "haiku.write.otherDraft",
 };
 
 const POEM_PREVIEW_PAGE_SIZE = 12;
 const ESSAY_PREVIEW_PAGE_SIZE = 9;
+const OTHER_PREVIEW_PAGE_SIZE = 9;
 const PREVIEW_PAGE_TRANSITION_MS = MOTION_PRESETS.list.exit.duration;
 const PREVIEW_FAST_EXIT_MS = MOTION_PRESETS.list.fastExit.duration;
 const PREVIEW_ROW_STAGGER_SEC = MOTION_PRESETS.list.enter.rowStagger;
@@ -643,24 +878,31 @@ export default defineComponent({
       viewportWidth.value = syncViewportWidth();
       window.addEventListener("resize", handleResize, { passive: true });
       loadPostPreviews();
+      loadOtherPreviews();
       restoreDraft("poem");
       restoreDraft("essay");
+      restoreDraft("other");
     });
 
     const activeComposer = ref("poem");
     const poemImageInput = ref(null);
     const essayImageInput = ref(null);
+    const otherImageInput = ref(null);
     const composerSection = ref(null);
     const composerModeSwitch = ref(null);
     const poemPreviewSection = ref(null);
     const essayPreviewSection = ref(null);
+    const otherPreviewSection = ref(null);
     const poemPreviewList = ref(null);
     const essayPreviewList = ref(null);
+    const otherPreviewList = ref(null);
     const composerPanelHost = ref(null);
     const poemComposerPanel = ref(null);
     const essayComposerPanel = ref(null);
+    const otherComposerPanel = ref(null);
     const editingPostId = ref("");
     const editingEssaySlug = ref("");
+    const editingOtherSlug = ref("");
 
     const poemForm = reactive({
       title: "",
@@ -683,31 +925,50 @@ export default defineComponent({
       body: "",
     });
 
+    const otherForm = reactive({
+      title: "",
+      category: "multimedia",
+      status: "draft",
+      summary: "",
+      image: "",
+      body: "",
+    });
+
     const poemMessage = ref("");
     const essayMessage = ref("");
+    const otherMessage = ref("");
     const poemUploadedImageName = ref("");
     const essayUploadedImageName = ref("");
+    const otherUploadedImageName = ref("");
     const toastVisible = ref(false);
     const toastMessage = ref("");
     const previewError = ref("");
     const previewPosts = ref([]);
     const previewEssays = ref([]);
+    const previewOtherPosts = ref([]);
     const previewPostsPage = ref(1);
     const previewEssaysPage = ref(1);
+    const previewOtherPage = ref(1);
     const previewPostsTotal = ref(0);
     const previewEssaysTotal = ref(0);
+    const previewOtherTotal = ref(0);
     const previewPostsTotalPages = ref(1);
     const previewEssaysTotalPages = ref(1);
+    const previewOtherTotalPages = ref(1);
     const previewPostsLoading = ref(false);
     const previewEssaysLoading = ref(false);
+    const previewOtherLoading = ref(false);
     const poemPreviewActiveIndex = ref(0);
     const essayPreviewActiveIndex = ref(0);
     const activeAuthorSuggestions = ref("");
     const poemPreviewQuery = ref("");
     const essayPreviewQuery = ref("");
+    const otherPreviewQuery = ref("");
     const poemPreviewCategory = ref("");
     const essayPreviewKind = ref("");
+    const otherPreviewCategory = ref("");
     const essayPreviewStatus = ref(authStore.canEdit() ? "editable" : "published");
+    const otherPreviewStatus = ref("all");
     const viewportWidth = ref(syncViewportWidth());
     const isPreviewCarouselMobile = computed(() => viewportWidth.value <= 800);
     const poemPreviewTransitionId = ref(0);
@@ -719,14 +980,17 @@ export default defineComponent({
     let toastTimer = null;
     let poemPreviewSearchTimer = null;
     let essayPreviewSearchTimer = null;
+    let otherPreviewSearchTimer = null;
     let authorSuggestionsCloseTimer = null;
     let poemPreviewScrollRaf = 0;
     let essayPreviewScrollRaf = 0;
 
     const posts = computed(() => previewPosts.value);
     const essays = computed(() => previewEssays.value);
+    const otherPosts = computed(() => previewOtherPosts.value);
     const visiblePosts = computed(() => previewPosts.value);
     const visibleEssays = computed(() => previewEssays.value);
+    const visibleOtherPosts = computed(() => previewOtherPosts.value);
     const showPoemPreviews = computed(
       () => previewPostsTotal.value > 0 || Boolean(poemPreviewQuery.value) || Boolean(poemPreviewCategory.value)
     );
@@ -742,18 +1006,26 @@ export default defineComponent({
         essayPreviewStatus.value !== defaultStatus
       );
     });
+    const showOtherPreviews = computed(
+      () =>
+        previewOtherTotal.value > 0 ||
+        Boolean(otherPreviewQuery.value) ||
+        Boolean(otherPreviewCategory.value) ||
+        otherPreviewStatus.value !== "all"
+    );
     const loading = computed(
       () =>
         previewPostsLoading.value ||
         previewEssaysLoading.value ||
+        previewOtherLoading.value ||
         blogStore.state.loading ||
         blogStore.state.essaysLoading
     );
-    const error = computed(() => previewError.value || blogStore.state.error || blogStore.state.essaysError);
+    const error = computed(() => previewError.value || blogStore.state.error || blogStore.state.essaysError || blogStore.state.haikuOtherError);
     const canEdit = computed(() => authStore.canEdit());
     const composerIntroText = computed(() =>
       canEdit.value
-        ? "Chọn đăng haiku, nghiên cứu và bình luận, hoặc duyệt bài gửi."
+        ? "Chọn đăng haiku, nghiên cứu và bình luận, Haiku ≠, hoặc duyệt bài gửi."
         : "Chọn gửi haiku hoặc nghiên cứu và bình luận để ban biên tập xem xét và xuất bản sau."
     );
     const categoryOptions = CATEGORY_OPTIONS;
@@ -782,6 +1054,19 @@ export default defineComponent({
       { value: "research", label: "Nghiên cứu" },
       { value: "commentary", label: "Bình luận" },
     ];
+    const haikuOtherCategoryOptions = HAIKU_OTHER_CATEGORIES.map((item) => ({
+      value: item.value,
+      label: item.label,
+    }));
+    const otherPreviewCategoryOptions = [
+      { value: "", label: "Tất cả" },
+      ...haikuOtherCategoryOptions,
+    ];
+    const otherPreviewStatusOptions = [
+      { value: "all", label: "Tất cả" },
+      { value: "published", label: "Published" },
+      { value: "draft", label: "Draft" },
+    ];
     const poemPreviewPaginationLabel = computed(() =>
       isPreviewCarouselMobile.value
         ? `${formatPageNumber(Math.min(previewPostsTotal.value, poemPreviewActiveIndex.value + 1 || 1))} / ${formatPageNumber(previewPostsTotal.value || 1)}`
@@ -791,6 +1076,9 @@ export default defineComponent({
       isPreviewCarouselMobile.value
         ? `${formatPageNumber(Math.min(previewEssaysTotal.value, essayPreviewActiveIndex.value + 1 || 1))} / ${formatPageNumber(previewEssaysTotal.value || 1)}`
         : `${formatPageNumber(previewEssaysPage.value)} / ${formatPageNumber(previewEssaysTotalPages.value)}`
+    );
+    const otherPreviewPaginationLabel = computed(() =>
+      `${formatPageNumber(previewOtherPage.value)} / ${formatPageNumber(previewOtherTotalPages.value)}`
     );
     const essayPreviewHeading = computed(() =>
       isSubmissionReviewTab.value ? "Bài gửi chờ duyệt" : "Nghiên cứu và bình luận"
@@ -836,6 +1124,7 @@ export default defineComponent({
     const showEssayComposer = computed(
       () => activeComposer.value === "essay" || (!canEdit.value && activeComposer.value !== "poem") || isSubmissionEssayReview.value
     );
+    const showOtherComposer = computed(() => canEdit.value && activeComposer.value === "other");
     const showPoemPreviewPagination = computed(() =>
       isPreviewCarouselMobile.value
         ? previewPostsTotal.value > 1
@@ -846,6 +1135,7 @@ export default defineComponent({
         ? previewEssaysTotal.value > 1
         : previewEssaysTotalPages.value > 1
     );
+    const showOtherPreviewPagination = computed(() => previewOtherTotalPages.value > 1);
     const poemPreviewPaginationPrevDisabled = computed(() =>
       isPreviewCarouselMobile.value
         ? poemPreviewActiveIndex.value <= 0
@@ -885,6 +1175,10 @@ export default defineComponent({
 
       if (composer === "essay" || (!canEdit.value && composer !== "poem")) {
         return essayComposerPanel.value;
+      }
+
+      if (composer === "other") {
+        return otherComposerPanel.value;
       }
 
       return null;
@@ -1152,6 +1446,14 @@ export default defineComponent({
         return;
       }
 
+      if (type === "other") {
+        previewOtherPosts.value = [];
+        previewOtherTotal.value = 0;
+        previewOtherTotalPages.value = 1;
+        previewOtherPage.value = 1;
+        return;
+      }
+
       previewPosts.value = [];
       previewPostsTotal.value = 0;
       previewPostsTotalPages.value = 1;
@@ -1233,6 +1535,30 @@ export default defineComponent({
       }
     }
 
+    async function loadOtherPreviews(page = previewOtherPage.value) {
+      previewOtherLoading.value = true;
+      previewError.value = "";
+
+      try {
+        const data = await blogStore.fetchPagedHaikuOtherPosts({
+          page,
+          pageSize: OTHER_PREVIEW_PAGE_SIZE,
+          status: otherPreviewStatus.value,
+          category: otherPreviewCategory.value,
+          search: otherPreviewQuery.value,
+        });
+        previewOtherPosts.value = data.items;
+        previewOtherPage.value = data.page;
+        previewOtherTotal.value = data.total;
+        previewOtherTotalPages.value = data.totalPages;
+      } catch (err) {
+        console.error("Không tải được preview Haiku ≠", err);
+        previewError.value = "Không tải được danh sách Haiku ≠ từ máy chủ.";
+      } finally {
+        previewOtherLoading.value = false;
+      }
+    }
+
     async function changePostPreviewPage(nextPage) {
       if (isPreviewCarouselMobile.value) {
         await movePreviewItem("poem", nextPage > previewPostsPage.value ? 1 : -1);
@@ -1265,15 +1591,33 @@ export default defineComponent({
       await transitionEssayPreviews(targetPage, targetCount < previewEssays.value.length);
     }
 
+    async function changeOtherPreviewPage(nextPage) {
+      const targetPage = Math.min(Math.max(1, nextPage), previewOtherTotalPages.value);
+      if (targetPage === previewOtherPage.value && previewOtherPosts.value.length) return;
+      await loadOtherPreviews(targetPage);
+      await nextTick();
+      otherPreviewSection.value?.scrollIntoView({ behavior: "smooth", block: "start" });
+      await animateGridEnterByRows(getPreviewItems("other"), {
+        columns: getEssayPreviewColumns(),
+        ...MOTION_PRESETS.list.enter,
+        rowStagger: PREVIEW_ROW_STAGGER_SEC,
+      });
+    }
+
     const getPreviewItems = (type) => {
-      const root = type === "essay" ? essayPreviewList.value : poemPreviewList.value;
+      const root =
+        type === "other"
+          ? otherPreviewList.value
+          : type === "essay"
+            ? essayPreviewList.value
+            : poemPreviewList.value;
       return root ? Array.from(root.querySelectorAll(".write-page__preview")) : [];
     };
 
     const animatePreviewEnter = async (type) => {
       await nextTick();
       const items = getPreviewItems(type);
-      const columns = type === "essay" ? getEssayPreviewColumns() : getPoemPreviewColumns();
+      const columns = type === "essay" || type === "other" ? getEssayPreviewColumns() : getPoemPreviewColumns();
       await animateGridEnterByRows(items, {
         columns,
         ...MOTION_PRESETS.list.enter,
@@ -1609,6 +1953,14 @@ export default defineComponent({
           essayForm.tagsInput = data.tagsInput || "";
           essayForm.body = data.body || "";
           essayUploadedImageName.value = data.uploadedImageName || "";
+        } else if (type === "other") {
+          otherForm.title = data.title || "";
+          otherForm.category = normalizeHaikuOtherCategory(data.category);
+          otherForm.status = data.status || "draft";
+          otherForm.summary = data.summary || "";
+          otherForm.image = data.image || "";
+          otherForm.body = sanitizeHaikuOtherHtml(data.body || "");
+          otherUploadedImageName.value = data.uploadedImageName || "";
         } else {
           poemForm.title = data.title || "";
           poemForm.author = data.author || "";
@@ -1625,21 +1977,38 @@ export default defineComponent({
     }
 
     const isEssayLikeType = (type) => type === "essay" || type === "submission";
+    const isOtherType = (type) => type === "other";
 
     const clearFileInput = (type) => {
-      const inputRef = isEssayLikeType(type) ? essayImageInput.value : poemImageInput.value;
+      const inputRef = isOtherType(type)
+        ? otherImageInput.value
+        : isEssayLikeType(type)
+          ? essayImageInput.value
+          : poemImageInput.value;
       if (inputRef) {
         inputRef.value = "";
       }
     };
 
     const openImagePicker = (type) => {
-      const inputRef = isEssayLikeType(type) ? essayImageInput.value : poemImageInput.value;
+      const inputRef = isOtherType(type)
+        ? otherImageInput.value
+        : isEssayLikeType(type)
+          ? essayImageInput.value
+          : poemImageInput.value;
       inputRef?.click();
     };
 
     const clearImage = (type) => {
-      if (isEssayLikeType(type)) {
+      if (isOtherType(type)) {
+        otherForm.image = "";
+        otherUploadedImageName.value = "";
+        otherMessage.value = "";
+        persistDraft("other", {
+          ...otherForm,
+          uploadedImageName: "",
+        });
+      } else if (isEssayLikeType(type)) {
         essayForm.image = "";
         essayUploadedImageName.value = "";
         essayMessage.value = "";
@@ -1690,6 +2059,19 @@ export default defineComponent({
       clearDraft("essay");
     };
 
+    const resetOtherForm = () => {
+      editingOtherSlug.value = "";
+      otherForm.title = "";
+      otherForm.category = "multimedia";
+      otherForm.status = "draft";
+      otherForm.summary = "";
+      otherForm.image = "";
+      otherForm.body = "";
+      otherUploadedImageName.value = "";
+      clearFileInput("other");
+      clearDraft("other");
+    };
+
     const applyPostToForm = (post, composer = "poem") => {
       activeComposer.value = composer;
       editingPostId.value = post.id;
@@ -1721,6 +2103,19 @@ export default defineComponent({
       clearFileInput("essay");
     };
 
+    const applyOtherToForm = (post) => {
+      activeComposer.value = "other";
+      editingOtherSlug.value = post.slug;
+      otherForm.title = post.title || "";
+      otherForm.category = normalizeHaikuOtherCategory(post.category);
+      otherForm.status = post.status || "published";
+      otherForm.summary = post.summary || "";
+      otherForm.image = post.image || "";
+      otherForm.body = sanitizeHaikuOtherHtml(post.body || "");
+      otherUploadedImageName.value = post.image ? "Đang dùng ảnh hiện tại" : "";
+      clearFileInput("other");
+    };
+
     watch(
       canEdit,
       () => {
@@ -1730,6 +2125,9 @@ export default defineComponent({
           essayPreviewStatus.value = "published";
         }
         loadEssayPreviews(1);
+        if (canEdit.value) {
+          loadOtherPreviews(1);
+        }
       },
       { immediate: true }
     );
@@ -1763,6 +2161,11 @@ export default defineComponent({
       transitionEssayPreviews(1);
     });
 
+    watch([otherPreviewCategory, otherPreviewStatus], () => {
+      resetPreviewData("other");
+      loadOtherPreviews(1);
+    });
+
     watch(poemPreviewQuery, () => {
       if (poemPreviewSearchTimer) {
         window.clearTimeout(poemPreviewSearchTimer);
@@ -1782,6 +2185,18 @@ export default defineComponent({
       essayPreviewSearchTimer = window.setTimeout(() => {
         transitionEssayPreviews(1);
         essayPreviewSearchTimer = null;
+      }, 180);
+    });
+
+    watch(otherPreviewQuery, () => {
+      if (otherPreviewSearchTimer) {
+        window.clearTimeout(otherPreviewSearchTimer);
+      }
+
+      otherPreviewSearchTimer = window.setTimeout(() => {
+        resetPreviewData("other");
+        loadOtherPreviews(1);
+        otherPreviewSearchTimer = null;
       }, 180);
     });
 
@@ -1809,6 +2224,11 @@ export default defineComponent({
       scrollToComposer();
     };
 
+    const startEditingOtherPost = (post) => {
+      applyOtherToForm(post);
+      scrollToComposer();
+    };
+
     const cancelPoemEditing = () => {
       showToast("Đã hủy chế độ chỉnh sửa haiku.");
       poemMessage.value = "";
@@ -1827,8 +2247,16 @@ export default defineComponent({
       }
     };
 
+    const cancelOtherEditing = () => {
+      showToast("Đã hủy chế độ chỉnh sửa Haiku ≠.");
+      otherMessage.value = "";
+      resetOtherForm();
+    };
+
     const setScopedMessage = (type, value) => {
-      if (isEssayLikeType(type)) {
+      if (isOtherType(type)) {
+        otherMessage.value = value;
+      } else if (isEssayLikeType(type)) {
         essayMessage.value = value;
       } else {
         poemMessage.value = value;
@@ -1844,6 +2272,15 @@ export default defineComponent({
       essayMessage.value = message || "Không chèn được ảnh vào nội dung.";
     };
 
+    const handleOtherBodyImageUploaded = (fileName) => {
+      otherMessage.value = "";
+      showToast(`Đã chèn ảnh "${fileName}" vào nội dung.`);
+    };
+
+    const handleOtherEditorError = (message) => {
+      otherMessage.value = message || "Không chèn được media vào nội dung.";
+    };
+
     const uploadMediaFile = async (file, scope, type) => {
       try {
         const uploaded = await uploadImageToMediaStore(file, {
@@ -1857,7 +2294,9 @@ export default defineComponent({
             ? "Không tải được ảnh bài gửi lên kho media."
             : type === "essay"
               ? "Không tải được ảnh bìa lên kho media."
-            : "Không tải được ảnh haiku lên kho media.";
+              : type === "other"
+                ? "Không tải được ảnh Haiku ≠ lên kho media."
+                : "Không tải được ảnh haiku lên kho media.";
         throw new Error(error?.message || fallback);
       }
     };
@@ -1867,10 +2306,17 @@ export default defineComponent({
         scope: isSubmissionComposer.value ? "submission-inline" : "essay-inline",
       });
 
+    const uploadOtherBodyImage = async (file) =>
+      uploadImageToMediaStore(file, {
+        scope: "haiku-other-inline",
+      });
+
     const handleImageUpload = async (event, type) => {
       const file = event.target?.files?.[0];
       if (!file) {
-        if (isEssayLikeType(type)) {
+        if (isOtherType(type)) {
+          otherUploadedImageName.value = "";
+        } else if (isEssayLikeType(type)) {
           essayUploadedImageName.value = "";
         } else {
           poemUploadedImageName.value = "";
@@ -1897,12 +2343,22 @@ export default defineComponent({
             ? "submission-cover"
             : type === "essay"
               ? "essay-cover"
-              : canEdit.value
-                ? "poem-cover"
-                : "submission-cover",
+              : type === "other"
+                ? "haiku-other-cover"
+                : canEdit.value
+                  ? "poem-cover"
+                  : "submission-cover",
           type
         );
-        if (isEssayLikeType(type)) {
+        if (isOtherType(type)) {
+          otherForm.image = uploaded.url;
+          otherUploadedImageName.value = file.name;
+          otherMessage.value = "";
+          persistDraft("other", {
+            ...otherForm,
+            uploadedImageName: file.name,
+          });
+        } else if (isEssayLikeType(type)) {
           essayForm.image = uploaded.url;
           essayUploadedImageName.value = file.name;
           essayMessage.value = "";
@@ -1957,6 +2413,21 @@ export default defineComponent({
         persistDraft("essay", {
           ...value,
           uploadedImageName: essayUploadedImageName.value,
+        });
+      },
+      { deep: true }
+    );
+
+    watch(
+      otherForm,
+      (value) => {
+        if (editingOtherSlug.value) {
+          return;
+        }
+
+        persistDraft("other", {
+          ...value,
+          uploadedImageName: otherUploadedImageName.value,
         });
       },
       { deep: true }
@@ -2247,6 +2718,47 @@ export default defineComponent({
       }
     };
 
+    const buildOtherPayload = () => ({
+      title: otherForm.title.trim(),
+      category: otherForm.category,
+      summary: otherForm.summary,
+      image: otherForm.image,
+      body: sanitizeHaikuOtherHtml(otherForm.body),
+      status: otherForm.status,
+    });
+
+    const submitOtherPost = async () => {
+      otherMessage.value = "";
+      const payload = buildOtherPayload();
+
+      if (!payload.title) {
+        otherMessage.value = "Hãy nhập tiêu đề cho bài Haiku ≠.";
+        return;
+      }
+
+      if (!hasHaikuOtherContent(payload.body)) {
+        otherMessage.value = "Hãy nhập nội dung hoặc chèn media cho bài Haiku ≠.";
+        return;
+      }
+
+      try {
+        const post = editingOtherSlug.value
+          ? await blogStore.updateHaikuOtherPost(editingOtherSlug.value, payload)
+          : await blogStore.addHaikuOtherPost(payload);
+
+        await loadOtherPreviews(editingOtherSlug.value ? previewOtherPage.value : 1);
+        showToast(editingOtherSlug.value
+          ? `Đã cập nhật "${post.title}".`
+          : `Đã đăng "${post.title}" vào Haiku ≠.`);
+        otherMessage.value = "";
+        resetOtherForm();
+      } catch (_err) {
+        otherMessage.value = editingOtherSlug.value
+          ? "Không cập nhật được bài Haiku ≠. Thử lại sau."
+          : "Không đăng được bài Haiku ≠. Thử lại sau.";
+      }
+    };
+
     const removePost = async (post) => {
       const confirmed = window.confirm(
         post.title ? `Xóa bài "${post.title}"?` : `Xóa bài của ${post.author}?`
@@ -2289,6 +2801,25 @@ export default defineComponent({
       }
     };
 
+    const removeOtherPost = async (post) => {
+      const confirmed = window.confirm(`Xóa bài Haiku ≠ "${post.title}"?`);
+      if (!confirmed) {
+        return;
+      }
+
+      try {
+        await blogStore.deleteHaikuOtherPost(post.slug);
+        await loadOtherPreviews(previewOtherPage.value);
+        if (editingOtherSlug.value === post.slug) {
+          resetOtherForm();
+        }
+        showToast(`Đã xóa "${post.title}".`);
+        otherMessage.value = "";
+      } catch (_err) {
+        otherMessage.value = "Không xóa được bài Haiku ≠. Thử lại sau.";
+      }
+    };
+
     const excerptEssay = (value = "") => {
       return excerptEssayContent(value, 180);
     };
@@ -2313,6 +2844,10 @@ export default defineComponent({
       return "Published";
     };
 
+    const formatOtherCategory = (value = "") => formatHaikuOtherCategory(value);
+
+    const formatOtherStatus = (value = "") => (value === "draft" ? "Draft" : "Published");
+
     const formatDate = (value) => {
       if (!value) return "";
       try {
@@ -2335,6 +2870,9 @@ export default defineComponent({
       if (essayPreviewSearchTimer) {
         window.clearTimeout(essayPreviewSearchTimer);
       }
+      if (otherPreviewSearchTimer) {
+        window.clearTimeout(otherPreviewSearchTimer);
+      }
       if (toastTimer) {
         window.clearTimeout(toastTimer);
       }
@@ -2349,65 +2887,89 @@ export default defineComponent({
       }
       killMotion(getPreviewItems("poem"));
       killMotion(getPreviewItems("essay"));
+      killMotion(getPreviewItems("other"));
     });
 
     return {
       activeComposer,
       poemImageInput,
       essayImageInput,
+      otherImageInput,
       poemPreviewSection,
       essayPreviewSection,
+      otherPreviewSection,
       composerSection,
       composerModeSwitch,
       poemPreviewList,
       essayPreviewList,
+      otherPreviewList,
       composerPanelHost,
       poemComposerPanel,
       essayComposerPanel,
+      otherComposerPanel,
       editingPostId,
       editingEssaySlug,
+      editingOtherSlug,
       poemForm,
       essayForm,
+      otherForm,
       poemMessage,
       essayMessage,
+      otherMessage,
       poemUploadedImageName,
       essayUploadedImageName,
+      otherUploadedImageName,
       toastVisible,
       toastMessage,
       posts,
       essays,
+      otherPosts,
       visiblePosts,
       visibleEssays,
+      visibleOtherPosts,
       isSubmissionPoemReview,
       isSubmissionEssayReview,
       showPoemPreviews,
       showEssayPreviews,
+      showOtherPreviews,
       showPoemPreviewPagination,
       showEssayPreviewPagination,
+      showOtherPreviewPagination,
       poemPreviewPaginationLabel,
       essayPreviewPaginationLabel,
+      otherPreviewPaginationLabel,
       poemPreviewPaginationPrevDisabled,
       poemPreviewPaginationNextDisabled,
       essayPreviewPaginationPrevDisabled,
       essayPreviewPaginationNextDisabled,
       previewPostsPage,
       previewEssaysPage,
+      previewOtherPage,
       previewPostsTotal,
       previewEssaysTotal,
+      previewOtherTotal,
       previewPostsTotalPages,
       previewEssaysTotalPages,
+      previewOtherTotalPages,
+      previewOtherLoading,
       poemAuthorSuggestions,
       essayAuthorSuggestions,
       showPoemAuthorSuggestions,
       showEssayAuthorSuggestions,
       poemPreviewQuery,
       essayPreviewQuery,
+      otherPreviewQuery,
       essayPreviewKind,
+      otherPreviewCategory,
+      otherPreviewStatus,
       poemPreviewCategory,
       essayPreviewStatus,
       essayPreviewKindOptions,
       essayPreviewStatusOptions,
       essayKindOptions,
+      haikuOtherCategoryOptions,
+      otherPreviewCategoryOptions,
+      otherPreviewStatusOptions,
       composerIntroText,
       canEdit,
       categoryOptions,
@@ -2416,6 +2978,7 @@ export default defineComponent({
       chooseComposer,
       changePostPreviewPage,
       changeEssayPreviewPage,
+      changeOtherPreviewPage,
       handlePostPreviewPrev,
       handlePostPreviewNext,
       handleEssayPreviewPrev,
@@ -2430,27 +2993,37 @@ export default defineComponent({
       submitEssay,
       submitSubmission,
       publishSubmission,
+      submitOtherPost,
       startEditingPost,
       startEditingSubmittedPost,
       startEditingEssay,
       startEditingSubmission,
+      startEditingOtherPost,
       cancelPoemEditing,
       cancelEssayEditing,
+      cancelOtherEditing,
       removePost,
       removeEssay,
+      removeOtherPost,
       formatDate,
       formatPageNumber,
       formatPoemCategory,
       formatPoemStatus,
       formatEssayKind,
       formatEssayStatus,
+      formatOtherCategory,
+      formatOtherStatus,
       excerptEssay,
       handleEssayBodyImageUploaded,
       handleEssayEditorError,
       uploadEssayLikeBodyImage,
+      handleOtherBodyImageUploaded,
+      handleOtherEditorError,
+      uploadOtherBodyImage,
       isSubmissionComposer,
       showPoemComposer,
       showEssayComposer,
+      showOtherComposer,
       poemSubmitLabel,
       showPublishPoemSubmissionButton,
       poemPreviewHeading,
@@ -2574,8 +3147,8 @@ export default defineComponent({
   scroll-margin-top: 6.5rem;
 }
 
-.write-page__mode-switch--triad {
-  grid-template-columns: repeat(3, max-content);
+.write-page__mode-switch--quad {
+  grid-template-columns: repeat(4, max-content);
 }
 
 .write-page__mode-tab {
@@ -3410,8 +3983,8 @@ export default defineComponent({
     gap: 1rem;
   }
 
-  .write-page__mode-switch--triad {
-    grid-template-columns: minmax(0, 0.68fr) minmax(0, 1.18fr) minmax(0, 0.64fr);
+  .write-page__mode-switch--quad {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .write-page__mode-tab {

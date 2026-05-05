@@ -81,7 +81,7 @@
         ></div>
       </div>
       <h2 class="content__item-title content__item-title--layer">
-        <router-link to="/haiku-number">Haiku#</router-link>
+        <router-link to="/haiku-khac">Haiku ≠</router-link>
       </h2>
     </div>
     <div class="content__item landing-page__section" style="--aspect-ratio: 500/545">
