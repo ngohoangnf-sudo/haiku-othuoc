@@ -143,15 +143,15 @@ export default defineComponent({
 
 .essay-page__cover {
   margin: 0;
-  overflow: hidden;
   background: var(--surface-subtle-bg);
 }
 
 .essay-page__cover img {
   display: block;
   width: 100%;
-  max-height: 38rem;
-  object-fit: cover;
+  height: auto;
+  max-height: none;
+  object-fit: contain;
   filter: saturate(0.82) contrast(1.04);
 }
 
@@ -217,8 +217,11 @@ export default defineComponent({
 .essay-page__body :deep(img) {
   display: block;
   width: min(100%, 42rem);
+  height: auto;
+  max-width: 100%;
   margin: 1.2rem 0;
   border-radius: 16px;
+  object-fit: contain;
 }
 
 @media (max-width: 640px) {

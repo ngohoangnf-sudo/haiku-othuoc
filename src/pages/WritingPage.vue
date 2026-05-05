@@ -287,7 +287,7 @@ Một chút quà Edo"
             <span class="form-field__label">Tags</span>
             <input v-model="essayForm.tagsInput" class="input" placeholder="Thi pháp, Đọc haiku, Ghi chép..." />
           </label>
-          <label class="form-field form-field--wide">
+          <div class="form-field form-field--wide">
             <span class="form-field__label">Nội dung bài</span>
             <RichEssayEditor
               v-model="essayForm.body"
@@ -296,7 +296,7 @@ Một chút quà Edo"
               @image-uploaded="handleEssayBodyImageUploaded"
               @error="handleEssayEditorError"
             />
-          </label>
+          </div>
           <div class="write-form__actions">
             <button class="submit-btn" type="submit">
               {{ essayLikeSubmitLabel }}

@@ -35,7 +35,13 @@
           draggable="false"
           class="link w-inline-block -col-or-link landing-page__poem-link"
         >
-          <p v-for="(line, index) in featuredPoem.lines" :key="index">{{ line }}</p>
+          <p
+            v-for="(line, index) in featuredPoem.lines"
+            :key="index"
+            class="landing-page__poem-line"
+          >
+            {{ line }}
+          </p>
           <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" crossorigin="anonymous" />
         </a>
       </div>
@@ -235,7 +241,12 @@ export default defineComponent({
 
   .landing-page__mobile-line {
     margin: 0;
+    width: 100%;
+    max-width: 100%;
     line-height: 1.46;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     opacity: 0;
     transform: translateY(1rem);
     filter: blur(1px);
@@ -333,9 +344,12 @@ export default defineComponent({
   }
 
   .landing-page__poem-link p {
-    width: auto;
+    width: 100%;
+    max-width: 100%;
     margin: 0;
-    white-space: normal;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .landing-page__section:nth-of-type(odd) .content__item-imgwrap {

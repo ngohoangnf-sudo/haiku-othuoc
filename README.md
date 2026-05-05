@@ -207,7 +207,7 @@ dist/spa
 To upload the frontend build:
 
 ```bash
-aws s3 sync dist/spa s3://YOUR_FRONTEND_BUCKET --delete
+aws s3 sync dist/spa s3://haiku-othuoc --delete
 ```
 
 Then invalidate CloudFront:

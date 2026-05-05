@@ -4,6 +4,24 @@
     <div class="page__scrollbar" aria-hidden="true">
       <div ref="scrollbarThumb" class="page__scrollbar-thumb"></div>
     </div>
+    <button
+      class="page__scroll-top"
+      :class="{ 'page__scroll-top--visible': showScrollTopButton }"
+      type="button"
+      aria-label="Scroll lên đầu trang"
+      @click="scrollToTop"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path
+          d="M12 18V6m0 0-4.75 4.75M12 6l4.75 4.75"
+          fill="none"
+          stroke="currentColor"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          stroke-width="1.35"
+        />
+      </svg>
+    </button>
     <div data-scroll class="page page--layout-1">
       <header-area />
       <router-view v-slot="{ Component, route: currentRoute }">
@@ -43,6 +61,7 @@ export default defineComponent({
     const route = useRoute();
     const backgroundMount = ref(null);
     const scrollbarThumb = ref(null);
+    const showScrollTopButton = ref(false);
     let backgroundEffect = null;
     let backgroundLoader = null;
     let backgroundKind = "";
@@ -200,9 +219,16 @@ export default defineComponent({
     const prefersReducedMotion = () =>
       window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches;
 
+    const updateScrollTopButtonVisibility = (scrollTop, viewportHeight, contentHeight) => {
+      const threshold = viewportHeight * 3;
+      const hasScrollablePage = contentHeight > viewportHeight + 160;
+
+      showScrollTopButton.value = hasScrollablePage && scrollTop > threshold;
+    };
+
     const syncScrollbar = ({ immediate = false } = {}) => {
       const thumb = scrollbarThumb.value;
-      if (!thumb || typeof window === "undefined") {
+      if (typeof window === "undefined") {
         return;
       }
 
@@ -216,6 +242,12 @@ export default defineComponent({
       const progress = Math.min(1, Math.max(0, scrollTop / maxScroll));
       const thumbHeight = trackHeight * progress;
       const hidden = contentHeight <= viewportHeight + 8;
+
+      updateScrollTopButtonVisibility(scrollTop, viewportHeight, contentHeight);
+
+      if (!thumb) {
+        return;
+      }
 
       thumb.parentElement?.classList.toggle("page__scrollbar--hidden", hidden);
 
@@ -247,18 +279,25 @@ export default defineComponent({
     };
 
     const setupScrollbar = () => {
-      if (typeof window === "undefined" || !scrollbarThumb.value || isMobilePerformanceMode()) {
+      if (typeof window === "undefined") {
         return null;
       }
 
-      scrollbarYTo = gsap.quickTo(scrollbarThumb.value, "y", {
-        duration: 0.28,
-        ease: "power3.out",
-      });
-      scrollbarHeightTo = gsap.quickTo(scrollbarThumb.value, "height", {
-        duration: 0.5,
-        ease: "power3.out",
-      });
+      const shouldAnimateScrollbar = Boolean(scrollbarThumb.value) && !isMobilePerformanceMode();
+
+      if (shouldAnimateScrollbar) {
+        scrollbarYTo = gsap.quickTo(scrollbarThumb.value, "y", {
+          duration: 0.28,
+          ease: "power3.out",
+        });
+        scrollbarHeightTo = gsap.quickTo(scrollbarThumb.value, "height", {
+          duration: 0.5,
+          ease: "power3.out",
+        });
+      } else {
+        scrollbarYTo = null;
+        scrollbarHeightTo = null;
+      }
 
       const handleScroll = () => queueScrollbarSync();
       const handleResize = () => queueScrollbarSync(true);
@@ -266,12 +305,14 @@ export default defineComponent({
       window.addEventListener("scroll", handleScroll, { passive: true });
       window.addEventListener("resize", handleResize, { passive: true });
 
-      scrollbarResizeObserver = new ResizeObserver(() => {
-        queueScrollbarSync();
-      });
-      scrollbarResizeObserver.observe(document.documentElement);
-      if (document.body) {
-        scrollbarResizeObserver.observe(document.body);
+      if (shouldAnimateScrollbar) {
+        scrollbarResizeObserver = new ResizeObserver(() => {
+          queueScrollbarSync();
+        });
+        scrollbarResizeObserver.observe(document.documentElement);
+        if (document.body) {
+          scrollbarResizeObserver.observe(document.body);
+        }
       }
 
       queueScrollbarSync(true);
@@ -317,6 +358,17 @@ export default defineComponent({
       done();
     };
 
+    const scrollToTop = () => {
+      if (typeof window === "undefined") {
+        return;
+      }
+
+      window.scrollTo({
+        top: 0,
+        behavior: prefersReducedMotion() ? "auto" : "smooth",
+      });
+    };
+
     onMounted(() => {
       authStore.ensureSession();
       themeStore.ensureInitialized();
@@ -329,16 +381,8 @@ export default defineComponent({
 
       const handleViewportChange = () => {
         syncBackgroundState();
-
-        if (isMobilePerformanceMode()) {
-          teardownScrollbar?.();
-          teardownScrollbar = null;
-          return;
-        }
-
-        if (!teardownScrollbar) {
-          teardownScrollbar = setupScrollbar();
-        }
+        teardownScrollbar?.();
+        teardownScrollbar = setupScrollbar();
       };
 
       window.addEventListener("resize", handleViewportChange, { passive: true });
@@ -371,8 +415,10 @@ export default defineComponent({
     return {
       backgroundMount,
       scrollbarThumb,
+      showScrollTopButton,
       handleRouteEnter,
       handleRouteLeave,
+      scrollToTop,
     };
   },
 });

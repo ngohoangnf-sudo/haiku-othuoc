@@ -21,7 +21,13 @@
           draggable="false"
           class="link w-inline-block --color-link"
         >
-          <p v-for="(line, index) in featuredPoem.lines" :key="index" class="right">{{ line }}</p>
+          <p
+            v-for="(line, index) in featuredPoem.lines"
+            :key="index"
+            class="right landing-page-light__poem-line"
+          >
+            {{ line }}
+          </p>
           <img class="" :src="featuredPoem.image" alt="" aria-hidden="true" crossorigin="anonymous" />
         </a>
       </div>
@@ -172,5 +178,16 @@ body {
   --color-bg: #fff !important;
   --color-link: #000;
   --color-link-hover: #b1a189;
+}
+</style>
+
+<style scoped>
+.landing-page-light__poem-line {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 </style>

@@ -158,7 +158,8 @@ export default defineComponent({
     const authorPoemSeed = ref("");
     const authorsPanelTransitionId = ref(0);
     const viewportWidth = ref(typeof window === "undefined" ? 1440 : window.innerWidth);
-    const OTHER_AUTHORS_PAGE_SIZE = 12;
+    const DESKTOP_OTHER_AUTHORS_PAGE_SIZE = 9;
+    const COMPACT_OTHER_AUTHORS_PAGE_SIZE = 12;
     const POEM_BATCH_SIZE = 9;
     let poemObserver = null;
     let poemLoadVersion = 0;
@@ -196,12 +197,17 @@ export default defineComponent({
         item.author.toLocaleLowerCase("vi-VN").includes(query)
       );
     });
+    const otherAuthorsPageSize = computed(() =>
+      viewportWidth.value <= 1152
+        ? COMPACT_OTHER_AUTHORS_PAGE_SIZE
+        : DESKTOP_OTHER_AUTHORS_PAGE_SIZE
+    );
     const otherAuthorsTotalPages = computed(() =>
-      Math.max(1, Math.ceil(filteredOtherAuthors.value.length / OTHER_AUTHORS_PAGE_SIZE))
+      Math.max(1, Math.ceil(filteredOtherAuthors.value.length / otherAuthorsPageSize.value))
     );
     const pagedOtherAuthors = computed(() => {
-      const start = (otherAuthorsPage.value - 1) * OTHER_AUTHORS_PAGE_SIZE;
-      return filteredOtherAuthors.value.slice(start, start + OTHER_AUTHORS_PAGE_SIZE);
+      const start = (otherAuthorsPage.value - 1) * otherAuthorsPageSize.value;
+      return filteredOtherAuthors.value.slice(start, start + otherAuthorsPageSize.value);
     });
 
     const formatDate = (value) => {

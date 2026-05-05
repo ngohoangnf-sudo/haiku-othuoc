@@ -37,6 +37,7 @@
 <script>
 import { computed, defineComponent, onBeforeUnmount, ref, watch } from "vue";
 import { EditorContent, useEditor } from "@tiptap/vue-3";
+import { TextSelection } from "@tiptap/pm/state";
 import StarterKit from "@tiptap/starter-kit";
 import Image from "@tiptap/extension-image";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -71,6 +72,112 @@ export default defineComponent({
   setup(props, { emit }) {
     const imageInput = ref(null);
     const uploadingImage = ref(false);
+    let storedMarksCleanupTimer = null;
+
+    const clearStoredMarksIfSelectionPlain = (view) => {
+      const { state } = view;
+      const { selection, schema } = state;
+
+      if (!selection.empty) {
+        return false;
+      }
+
+      const activeMarks = selection.$from.marks();
+      const hasFormattingMark = activeMarks.some(
+        (mark) =>
+          mark.type === schema.marks.bold ||
+          mark.type === schema.marks.italic
+      );
+
+      if (hasFormattingMark || !state.storedMarks?.length) {
+        return false;
+      }
+
+      view.dispatch(state.tr.setStoredMarks(null));
+      return false;
+    };
+
+    const scheduleStoredMarksCleanup = (view) => {
+      if (!view || view.isDestroyed) {
+        return false;
+      }
+
+      if (storedMarksCleanupTimer) {
+        window.clearTimeout(storedMarksCleanupTimer);
+      }
+
+      storedMarksCleanupTimer = window.setTimeout(() => {
+        storedMarksCleanupTimer = null;
+        if (!view.isDestroyed) {
+          clearStoredMarksIfSelectionPlain(view);
+        }
+      }, 0);
+
+      return false;
+    };
+
+    const focusEditorWithoutPageScroll = (view, event) => {
+      if (typeof window === "undefined" || !(event instanceof MouseEvent)) {
+        return false;
+      }
+
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.altKey) {
+        return false;
+      }
+
+      event.preventDefault();
+
+      try {
+        view.dom?.focus?.({ preventScroll: true });
+      } catch (_error) {
+        view.focus();
+      }
+
+      const coords = view.posAtCoords({
+        left: event.clientX,
+        top: event.clientY,
+      });
+
+      if (coords?.pos != null) {
+        view.dispatch(
+          view.state.tr.setSelection(TextSelection.create(view.state.doc, coords.pos))
+        );
+      }
+
+      scheduleStoredMarksCleanup(view);
+      return true;
+    };
+
+    const isMarkVisiblyActive = (instance, markName) => {
+      const view = instance?.view;
+      const markType = instance?.state?.schema?.marks?.[markName];
+      if (!view || !markType) {
+        return false;
+      }
+
+      const { state } = view;
+      const { selection } = state;
+
+      if (selection.empty) {
+        return selection.$from.marks().some((mark) => mark.type === markType);
+      }
+
+      let hasText = false;
+      let allTextMarked = true;
+      state.doc.nodesBetween(selection.from, selection.to, (node) => {
+        if (!node.isText || !node.text?.trim()) {
+          return;
+        }
+
+        hasText = true;
+
+        if (!node.marks.some((mark) => mark.type === markType)) {
+          allTextMarked = false;
+        }
+      });
+
+      return hasText && allTextMarked;
+    };
 
     const scrollSelectionWithinEditor = (view) => {
       if (typeof window === "undefined") {
@@ -104,6 +211,21 @@ export default defineComponent({
       editable: !props.disabled,
       editorProps: {
         handleScrollToSelection: (view) => scrollSelectionWithinEditor(view),
+        handleDOMEvents: {
+          focus: (view) => {
+            return scheduleStoredMarksCleanup(view);
+          },
+          mousedown: (view, event) => {
+            if (!view.hasFocus()) {
+              return focusEditorWithoutPageScroll(view, event);
+            }
+
+            return scheduleStoredMarksCleanup(view);
+          },
+          mouseup: (view) => {
+            return scheduleStoredMarksCleanup(view);
+          },
+        },
       },
       extensions: [
         StarterKit.configure({
@@ -124,6 +246,9 @@ export default defineComponent({
       ],
       onUpdate: ({ editor: editorInstance }) => {
         emit("update:modelValue", editorInstance.getHTML());
+      },
+      onSelectionUpdate: ({ editor: editorInstance }) => {
+        scheduleStoredMarksCleanup(editorInstance.view);
       },
     });
 
@@ -161,13 +286,13 @@ export default defineComponent({
         {
           key: "bold",
           label: "B",
-          active: () => instance.isActive("bold"),
+          active: () => isMarkVisiblyActive(instance, "bold"),
           run: () => instance.chain().focus().toggleBold().run(),
         },
         {
           key: "italic",
           label: "I",
-          active: () => instance.isActive("italic"),
+          active: () => isMarkVisiblyActive(instance, "italic"),
           run: () => instance.chain().focus().toggleItalic().run(),
         },
         {
@@ -281,6 +406,9 @@ export default defineComponent({
     };
 
     onBeforeUnmount(() => {
+      if (storedMarksCleanupTimer) {
+        window.clearTimeout(storedMarksCleanupTimer);
+      }
       editor.value?.destroy();
     });
 
@@ -431,8 +559,11 @@ export default defineComponent({
 .rich-editor__content :deep(.tiptap img) {
   display: block;
   width: min(100%, 34rem);
+  height: auto;
+  max-width: 100%;
   border-radius: 14px;
   margin: 1.2rem 0;
+  object-fit: contain;
 }
 
 .rich-editor__content :deep(.tiptap p.is-editor-empty:first-child::before) {
