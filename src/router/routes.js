@@ -58,7 +58,16 @@ const routes = [
     path: "/authors",
     component: () => import("layouts/MainLayout.vue"),
     children: [
-      { path: "", component: () => import("pages/AuthorPage.vue") },
+      {
+        path: "",
+        beforeEnter: async () => {
+          const { default: blogStore } = await import("src/stores/blogStore");
+          await blogStore.loadAuthors();
+          const firstSlug = blogStore.state.authors[0]?.authorSlug;
+          if (firstSlug) return { path: `/authors/${firstSlug}`, replace: true };
+        },
+        component: () => import("pages/AuthorPage.vue"),
+      },
       { path: ":slug", component: () => import("pages/AuthorPage.vue") },
     ],
   },
