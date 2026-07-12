@@ -2165,6 +2165,151 @@ async function getAuthors() {
   return result.rows;
 }
 
+function mapLibraryBookRow(row) {
+  return {
+    id: row.id,
+    title: row.title || "",
+    authorName: row.authorName || "",
+    description: row.description || "",
+    fileUrl: row.fileUrl || "",
+    fileKey: row.fileKey || "",
+    fileFormat: row.fileFormat || "",
+    mimeType: row.mimeType || "",
+    originalName: row.originalName || "",
+    sizeBytes: row.sizeBytes === null || row.sizeBytes === undefined ? null : Number(row.sizeBytes),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    uploadedBy: row.uploadedByDisplayName || row.uploadedByUsername || "",
+  };
+}
+
+const LIBRARY_BOOK_SELECT = `
+  SELECT
+    b.id,
+    b.title,
+    b.author_name AS "authorName",
+    b.description,
+    b.file_url AS "fileUrl",
+    b.file_key AS "fileKey",
+    b.file_format AS "fileFormat",
+    b.mime_type AS "mimeType",
+    b.original_name AS "originalName",
+    b.size_bytes AS "sizeBytes",
+    b.created_at AS "createdAt",
+    b.updated_at AS "updatedAt",
+    u.username AS "uploadedByUsername",
+    u.display_name AS "uploadedByDisplayName"
+  FROM library_books b
+  LEFT JOIN users u ON u.id = b.created_by_user_id
+`;
+
+async function getPagedLibraryBooks(filters = {}, pagination = {}) {
+  await init();
+
+  const values = [];
+  const clauses = [];
+
+  if (filters.format) {
+    values.push(String(filters.format).toLowerCase());
+    clauses.push(`b.file_format = $${values.length}`);
+  }
+
+  if (filters.search) {
+    values.push(`%${String(filters.search).trim()}%`);
+    clauses.push(`(
+      b.title ILIKE $${values.length}
+      OR b.author_name ILIKE $${values.length}
+      OR b.description ILIKE $${values.length}
+    )`);
+  }
+
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  const pageSize = Math.max(1, Math.min(Number(pagination.pageSize) || 12, 100));
+  const page = Math.max(1, Number(pagination.page) || 1);
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*)::int AS total FROM library_books b ${where}`,
+    values
+  );
+
+  const total = countResult.rows[0]?.total || 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const safeOffset = (safePage - 1) * pageSize;
+
+  const itemsResult = await pool.query(
+    `
+      ${LIBRARY_BOOK_SELECT}
+      ${where}
+      ORDER BY b.created_at DESC
+      LIMIT $${values.length + 1}
+      OFFSET $${values.length + 2}
+    `,
+    [...values, pageSize, safeOffset]
+  );
+
+  return {
+    items: itemsResult.rows.map(mapLibraryBookRow),
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+  };
+}
+
+async function getLibraryBookById(id) {
+  await init();
+
+  const result = await pool.query(`${LIBRARY_BOOK_SELECT} WHERE b.id = $1`, [id]);
+  const row = result.rows[0];
+  return row ? mapLibraryBookRow(row) : null;
+}
+
+async function insertLibraryBook(book) {
+  await init();
+
+  await pool.query(
+    `
+      INSERT INTO library_books (
+        id,
+        title,
+        author_name,
+        description,
+        file_url,
+        file_key,
+        file_format,
+        mime_type,
+        original_name,
+        size_bytes,
+        created_by_user_id
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    `,
+    [
+      book.id,
+      book.title,
+      book.authorName || "",
+      book.description || "",
+      book.fileUrl,
+      book.fileKey || "",
+      book.fileFormat,
+      book.mimeType || null,
+      book.originalName || null,
+      book.sizeBytes ?? null,
+      book.createdByUserId || null,
+    ]
+  );
+
+  return getLibraryBookById(book.id);
+}
+
+async function deleteLibraryBook(id) {
+  await init();
+
+  const result = await pool.query("DELETE FROM library_books WHERE id = $1", [id]);
+  return result.rowCount || 0;
+}
+
 async function seedIfEmpty(seedPosts = []) {
   await init();
   const result = await pool.query("SELECT COUNT(*)::int AS total FROM poems");
@@ -2344,6 +2489,10 @@ module.exports = {
   updateHaikuOtherPost,
   deleteHaikuOtherPost,
   incrementHaikuOtherViewCount,
+  getPagedLibraryBooks,
+  getLibraryBookById,
+  insertLibraryBook,
+  deleteLibraryBook,
   seedIfEmpty,
   seedPostsIfMissing,
   seedEssaysIfEmpty,

@@ -34,6 +34,14 @@ const MEDIA_PUBLIC_BASE = normalizeBaseUrl(process.env.MEDIA_PUBLIC_BASE || "");
 const MANAGED_MEDIA_URL_PREFIX =
   MEDIA_PUBLIC_BASE && S3_UPLOAD_PREFIX ? `${MEDIA_PUBLIC_BASE}/${S3_UPLOAD_PREFIX}/` : "";
 const MEDIA_UPLOAD_MAX_BYTES = resolveMediaUploadMaxBytes(process.env.MEDIA_UPLOAD_MAX_MB);
+const EBOOK_UPLOAD_MAX_BYTES = resolveEbookUploadMaxBytes(process.env.EBOOK_UPLOAD_MAX_MB);
+const LIBRARY_EBOOK_FORMATS = {
+  pdf: "application/pdf",
+  epub: "application/epub+zip",
+  mobi: "application/x-mobipocket-ebook",
+  azw3: "application/vnd.amazon.ebook",
+  txt: "text/plain",
+};
 const MEDIA_UPLOAD_URL_TTL_SECONDS = 15 * 60;
 const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
 const SUBMISSION_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
@@ -963,6 +971,178 @@ app.delete("/api/haiku-other/:slug", requireEditor, async (req, res) => {
   } catch (err) {
     console.error("Lỗi xóa bài Haiku Khác", err);
     res.status(500).json({ message: "Không xóa được bài Haiku Khác" });
+  }
+});
+
+app.get("/api/library", async (req, res) => {
+  try {
+    const format = resolveLibraryFileFormat(`x.${String(req.query.format || "").toLowerCase()}`);
+    const result = await db.getPagedLibraryBooks(
+      {
+        format: format || null,
+        search: typeof req.query.search === "string" ? req.query.search.trim() : "",
+      },
+      {
+        page: Number(req.query.page || 1),
+        pageSize: Number(req.query.pageSize || 12),
+      }
+    );
+    res.json(result);
+  } catch (err) {
+    console.error("Lỗi lấy danh sách thư viện", err);
+    res.status(500).json({ message: "Không tải được danh sách sách" });
+  }
+});
+
+app.get("/api/library/:id", async (req, res) => {
+  try {
+    const book = await db.getLibraryBookById(req.params.id);
+    if (!book) {
+      return res.status(404).json({ message: "Không tìm thấy sách" });
+    }
+    res.json(book);
+  } catch (err) {
+    console.error("Lỗi lấy thông tin sách", err);
+    res.status(500).json({ message: "Không tải được thông tin sách" });
+  }
+});
+
+app.post("/api/library/presign", requireEditor, mediaPresignRateLimit, async (req, res) => {
+  try {
+    if (!S3_UPLOAD_BUCKET || !S3_UPLOAD_REGION || !MEDIA_PUBLIC_BASE) {
+      return res.status(503).json({
+        message: "Media upload chưa được cấu hình trên máy chủ.",
+      });
+    }
+
+    const fileName = typeof req.body?.fileName === "string" ? req.body.fileName.trim() : "";
+    const size = Number(req.body?.size || 0);
+    const format = resolveLibraryFileFormat(fileName);
+
+    if (!fileName) {
+      return res.status(400).json({ message: "Thiếu thông tin file upload." });
+    }
+
+    if (!format) {
+      return res.status(400).json({
+        message: `Định dạng không được hỗ trợ. Hỗ trợ: ${Object.keys(LIBRARY_EBOOK_FORMATS).join(", ")}.`,
+      });
+    }
+
+    if (!Number.isFinite(size) || size <= 0) {
+      return res.status(400).json({ message: "Kích thước file không hợp lệ." });
+    }
+
+    if (size > EBOOK_UPLOAD_MAX_BYTES) {
+      return res.status(400).json({
+        message: `File quá lớn. Hãy chọn file nhỏ hơn ${Math.round(EBOOK_UPLOAD_MAX_BYTES / (1024 * 1024))}MB.`,
+      });
+    }
+
+    const contentType =
+      (typeof req.body?.contentType === "string" && req.body.contentType.trim()) ||
+      LIBRARY_EBOOK_FORMATS[format];
+
+    const upload = await createPresignedMediaUpload({
+      fileName,
+      contentType,
+      scope: "library/ebooks",
+      actorUserId: req.auth.user?.id || null,
+    });
+
+    res.json({ ...upload, fileFormat: format, contentType });
+  } catch (err) {
+    console.error("Lỗi tạo presigned ebook upload", err);
+    res.status(500).json({ message: "Không tạo được link upload ebook." });
+  }
+});
+
+app.post("/api/library", requireEditor, async (req, res) => {
+  try {
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const fileUrl = typeof req.body?.fileUrl === "string" ? req.body.fileUrl.trim() : "";
+    const originalName =
+      typeof req.body?.originalName === "string" ? req.body.originalName.trim() : "";
+    const format = resolveLibraryFileFormat(originalName || fileUrl);
+    const sizeBytes = Number(req.body?.sizeBytes || 0);
+
+    if (!title) {
+      return res.status(400).json({ message: "Thiếu tên sách." });
+    }
+
+    if (!fileUrl || !/^https?:\/\//.test(fileUrl)) {
+      return res.status(400).json({ message: "Thiếu file ebook hợp lệ." });
+    }
+
+    if (!format) {
+      return res.status(400).json({
+        message: `Định dạng không được hỗ trợ. Hỗ trợ: ${Object.keys(LIBRARY_EBOOK_FORMATS).join(", ")}.`,
+      });
+    }
+
+    const book = await db.insertLibraryBook({
+      id: `book-${randomUUID()}`,
+      title,
+      authorName: typeof req.body?.authorName === "string" ? req.body.authorName.trim() : "",
+      description: typeof req.body?.description === "string" ? req.body.description.trim() : "",
+      fileUrl,
+      fileKey: typeof req.body?.fileKey === "string" ? req.body.fileKey.trim() : "",
+      fileFormat: format,
+      mimeType:
+        (typeof req.body?.mimeType === "string" && req.body.mimeType.trim()) ||
+        LIBRARY_EBOOK_FORMATS[format],
+      originalName: originalName || null,
+      sizeBytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : null,
+      createdByUserId: req.auth.user.id,
+    });
+
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "library.create",
+      resourceType: "library_book",
+      resourceId: book.id,
+      details: { title: book.title, format: book.fileFormat },
+    });
+
+    res.status(201).json(book);
+  } catch (err) {
+    console.error("Lỗi thêm sách vào thư viện", err);
+    res.status(500).json({ message: "Không thêm được sách vào thư viện" });
+  }
+});
+
+app.delete("/api/library/:id", requireEditor, async (req, res) => {
+  try {
+    const existing = await db.getLibraryBookById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ message: "Không tìm thấy sách để xóa" });
+    }
+
+    await db.deleteLibraryBook(existing.id);
+
+    if (existing.fileKey) {
+      try {
+        await deleteManagedMediaObjectByKey(existing.fileKey);
+      } catch (error) {
+        console.warn("Không xóa được file ebook trên S3", {
+          key: existing.fileKey,
+          error: error?.message || error,
+        });
+      }
+    }
+
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "library.delete",
+      resourceType: "library_book",
+      resourceId: existing.id,
+      details: { title: existing.title, format: existing.fileFormat },
+    });
+
+    res.status(204).end();
+  } catch (err) {
+    console.error("Lỗi xóa sách khỏi thư viện", err);
+    res.status(500).json({ message: "Không xóa được sách" });
   }
 });
 
@@ -2007,6 +2187,17 @@ function resolveMediaUploadMaxBytes(value) {
   const mb = Number(value || 5);
   const safeMb = Number.isFinite(mb) && mb > 0 ? mb : 5;
   return safeMb * 1024 * 1024;
+}
+
+function resolveEbookUploadMaxBytes(value) {
+  const mb = Number(value || 100);
+  const safeMb = Number.isFinite(mb) && mb > 0 ? mb : 100;
+  return safeMb * 1024 * 1024;
+}
+
+function resolveLibraryFileFormat(fileName = "") {
+  const extension = path.extname(String(fileName || "")).toLowerCase().replace(/^\./, "");
+  return Object.prototype.hasOwnProperty.call(LIBRARY_EBOOK_FORMATS, extension) ? extension : "";
 }
 
 function resolveBooleanEnv(value, fallback = false) {

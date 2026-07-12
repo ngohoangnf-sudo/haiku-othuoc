@@ -135,6 +135,22 @@ CREATE TABLE IF NOT EXISTS essay_tag_links (
   PRIMARY KEY (essay_id, tag_id)
 );
 
+CREATE TABLE IF NOT EXISTS library_books (
+  id TEXT PRIMARY KEY,
+  title TEXT NOT NULL,
+  author_name TEXT NOT NULL DEFAULT '',
+  description TEXT NOT NULL DEFAULT '',
+  file_url TEXT NOT NULL,
+  file_key TEXT NOT NULL DEFAULT '',
+  file_format TEXT NOT NULL,
+  mime_type TEXT,
+  original_name TEXT,
+  size_bytes BIGINT,
+  created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE INDEX IF NOT EXISTS idx_poems_category_published_at
   ON poems (category, published_at DESC, created_at DESC);
 
@@ -152,6 +168,9 @@ CREATE INDEX IF NOT EXISTS idx_haiku_other_category_status_published_at
 
 CREATE INDEX IF NOT EXISTS idx_haiku_other_created_by_user_id
   ON haiku_other_posts (created_by_user_id);
+
+CREATE INDEX IF NOT EXISTS idx_library_books_created_at
+  ON library_books (created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_users_role_status
   ON users (role, status);

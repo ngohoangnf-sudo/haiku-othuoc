@@ -90,14 +90,8 @@ const routes = [
     path: "/library",
     component: () => import("layouts/MainLayout.vue"),
     children: [
-      {
-        path: "",
-        component: () => import("pages/ComingSoonPage.vue"),
-        meta: {
-          title: "Thư viện",
-          message: "Không gian lưu trữ và tra cứu đang được xây dựng. Coming soon.",
-        },
-      },
+      { path: "", component: () => import("pages/LibraryPage.vue") },
+      { path: ":id", component: () => import("pages/BookReaderPage.vue") },
     ],
   },
 
