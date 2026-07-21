@@ -133,6 +133,7 @@ if is_true "$DEPLOY_BACKEND"; then
     -p "$DEPLOY_SSH_PORT"
     -o BatchMode=yes
     -o ConnectTimeout=15
+    -o StrictHostKeyChecking=accept-new
   )
 
   log "Deploying backend"
@@ -181,7 +182,11 @@ fi
 
 if is_true "$DEPLOY_FRONTEND"; then
   aws_command=(aws)
-  [[ -n "${AWS_PROFILE:-}" ]] && aws_command+=(--profile "$AWS_PROFILE")
+  if [[ -n "${AWS_PROFILE:-}" ]]; then
+    aws_command+=(--profile "$AWS_PROFILE")
+  else
+    unset AWS_PROFILE
+  fi
   [[ -n "${AWS_REGION:-}" ]] && aws_command+=(--region "$AWS_REGION")
 
   s3_excludes=()
