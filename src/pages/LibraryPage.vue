@@ -67,6 +67,14 @@
           <button
             v-if="canManage"
             type="button"
+            class="library-book-card__action"
+            @click="openEditDialog(book)"
+          >
+            Sửa
+          </button>
+          <button
+            v-if="canManage"
+            type="button"
             class="library-book-card__action library-book-card__action--danger"
             :disabled="deletingId === book.id"
             @click="removeBook(book)"
@@ -98,13 +106,21 @@
       </button>
     </div>
 
-    <div v-if="uploadDialogOpen" class="library-upload" role="dialog" aria-modal="true" aria-label="Thêm ebook">
+    <div
+      v-if="uploadDialogOpen"
+      class="library-upload"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="editingBook ? 'Chỉnh sửa ebook' : 'Thêm ebook'"
+    >
       <div class="library-upload__backdrop" @click="closeUploadDialog"></div>
       <form class="library-upload__panel" @submit.prevent="submitUpload">
-        <h2 class="library-upload__title">Thêm ebook</h2>
+        <h2 class="library-upload__title">{{ editingBook ? "Chỉnh sửa ebook" : "Thêm ebook" }}</h2>
 
         <label class="library-upload__field">
-          <span class="library-upload__label">File ebook ({{ supportedFormatsLabel }})</span>
+          <span class="library-upload__label">
+            {{ editingBook ? "Thay file ebook" : "File ebook" }} ({{ supportedFormatsLabel }})
+          </span>
           <input
             ref="fileInput"
             type="file"
@@ -112,6 +128,9 @@
             :accept="acceptExtensions"
             @change="onFileChange"
           />
+          <span v-if="editingBook" class="library-upload__hint">
+            Để trống nếu muốn giữ file hiện tại: {{ editingBook.originalName || editingBook.fileFormat.toUpperCase() }}
+          </span>
         </label>
 
         <label class="library-upload__field">
@@ -136,7 +155,7 @@
             Hủy
           </button>
           <button type="submit" class="library-upload__button library-upload__button--primary" :disabled="uploading">
-            {{ uploading ? "Đang tải lên..." : "Tải lên" }}
+            {{ uploading ? "Đang lưu..." : editingBook ? "Lưu thay đổi" : "Tải lên" }}
           </button>
         </div>
       </form>
@@ -177,6 +196,7 @@ export default defineComponent({
     const uploadDialogOpen = ref(false);
     const uploading = ref(false);
     const uploadError = ref("");
+    const editingBook = ref(null);
     const fileInput = ref(null);
     const uploadForm = reactive({
       title: "",
@@ -234,6 +254,7 @@ export default defineComponent({
 
     function openUploadDialog() {
       uploadError.value = "";
+      editingBook.value = null;
       uploadForm.title = "";
       uploadForm.authorName = "";
       uploadForm.description = "";
@@ -241,9 +262,20 @@ export default defineComponent({
       uploadDialogOpen.value = true;
     }
 
+    function openEditDialog(book) {
+      uploadError.value = "";
+      editingBook.value = book;
+      uploadForm.title = book.title || "";
+      uploadForm.authorName = book.authorName || "";
+      uploadForm.description = book.description || "";
+      uploadForm.file = null;
+      uploadDialogOpen.value = true;
+    }
+
     function closeUploadDialog() {
       if (uploading.value) return;
       uploadDialogOpen.value = false;
+      editingBook.value = null;
     }
 
     function onFileChange(event) {
@@ -255,7 +287,7 @@ export default defineComponent({
     }
 
     async function submitUpload() {
-      if (!uploadForm.file) {
+      if (!editingBook.value && !uploadForm.file) {
         uploadError.value = "Hãy chọn một file ebook.";
         return;
       }
@@ -268,32 +300,41 @@ export default defineComponent({
       uploadError.value = "";
 
       try {
-        const uploaded = await uploadEbookToLibrary(uploadForm.file);
+        const uploaded = uploadForm.file ? await uploadEbookToLibrary(uploadForm.file) : null;
+        const bookId = editingBook.value?.id || "";
 
-        const response = await fetch(`${API_BASE}/library`, {
-          method: "POST",
-          headers: authStore.getAuthHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            title: uploadForm.title,
-            authorName: uploadForm.authorName,
-            description: uploadForm.description,
-            fileUrl: uploaded.url,
-            fileKey: uploaded.key,
-            originalName: uploaded.fileName,
-            mimeType: uploaded.mimeType,
-            sizeBytes: uploaded.sizeBytes,
-          }),
-        });
+        const response = await fetch(
+          bookId ? `${API_BASE}/library/${encodeURIComponent(bookId)}` : `${API_BASE}/library`,
+          {
+            method: bookId ? "PUT" : "POST",
+            headers: authStore.getAuthHeaders({ "Content-Type": "application/json" }),
+            body: JSON.stringify({
+              title: uploadForm.title,
+              authorName: uploadForm.authorName,
+              description: uploadForm.description,
+              ...(uploaded
+                ? {
+                    fileUrl: uploaded.url,
+                    fileKey: uploaded.key,
+                    originalName: uploaded.fileName,
+                    mimeType: uploaded.mimeType,
+                    sizeBytes: uploaded.sizeBytes,
+                  }
+                : {}),
+            }),
+          }
+        );
 
         if (!response.ok) {
           const data = await response.json().catch(() => null);
-          throw new Error(data?.message || "Không lưu được sách vào thư viện.");
+          throw new Error(data?.message || "Không lưu được thay đổi trong thư viện.");
         }
 
         uploadDialogOpen.value = false;
-        await loadBooks(1);
+        editingBook.value = null;
+        await loadBooks(bookId ? page.value : 1);
       } catch (err) {
-        uploadError.value = err.message || "Không tải được ebook lên.";
+        uploadError.value = err.message || "Không lưu được ebook.";
       } finally {
         uploading.value = false;
       }
@@ -369,9 +410,11 @@ export default defineComponent({
       uploadDialogOpen,
       uploading,
       uploadError,
+      editingBook,
       uploadForm,
       fileInput,
       openUploadDialog,
+      openEditDialog,
       closeUploadDialog,
       onFileChange,
       submitUpload,
@@ -697,6 +740,12 @@ export default defineComponent({
 .library-upload__file {
   color: var(--color-muted);
   font-size: 0.82rem;
+}
+
+.library-upload__hint {
+  color: var(--color-muted-faint);
+  font-size: 0.78rem;
+  line-height: 1.4;
 }
 
 .library-upload__actions {

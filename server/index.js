@@ -1111,6 +1111,101 @@ app.post("/api/library", requireEditor, async (req, res) => {
   }
 });
 
+app.put("/api/library/:id", requireEditor, async (req, res) => {
+  try {
+    const existing = await db.getLibraryBookById(req.params.id);
+    if (!existing) {
+      return res.status(404).json({ message: "Không tìm thấy sách để chỉnh sửa" });
+    }
+
+    const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+    const authorName =
+      typeof req.body?.authorName === "string" ? req.body.authorName.trim() : "";
+    const description =
+      typeof req.body?.description === "string" ? req.body.description.trim() : "";
+    const replacementFileUrl =
+      typeof req.body?.fileUrl === "string" ? req.body.fileUrl.trim() : "";
+    const isReplacingFile = Boolean(replacementFileUrl);
+
+    if (!title) {
+      return res.status(400).json({ message: "Thiếu tên sách." });
+    }
+
+    let fileDetails = {
+      fileUrl: existing.fileUrl,
+      fileKey: existing.fileKey,
+      fileFormat: existing.fileFormat,
+      mimeType: existing.mimeType,
+      originalName: existing.originalName,
+      sizeBytes: existing.sizeBytes,
+    };
+
+    if (isReplacingFile) {
+      const originalName =
+        typeof req.body?.originalName === "string" ? req.body.originalName.trim() : "";
+      const format = resolveLibraryFileFormat(originalName || replacementFileUrl);
+      const sizeBytes = Number(req.body?.sizeBytes || 0);
+
+      if (!/^https?:\/\//.test(replacementFileUrl)) {
+        return res.status(400).json({ message: "File ebook thay thế không hợp lệ." });
+      }
+
+      if (!format) {
+        return res.status(400).json({
+          message: `Định dạng không được hỗ trợ. Hỗ trợ: ${Object.keys(LIBRARY_EBOOK_FORMATS).join(", ")}.`,
+        });
+      }
+
+      fileDetails = {
+        fileUrl: replacementFileUrl,
+        fileKey: typeof req.body?.fileKey === "string" ? req.body.fileKey.trim() : "",
+        fileFormat: format,
+        mimeType:
+          (typeof req.body?.mimeType === "string" && req.body.mimeType.trim()) ||
+          LIBRARY_EBOOK_FORMATS[format],
+        originalName: originalName || null,
+        sizeBytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : null,
+      };
+    }
+
+    const book = await db.updateLibraryBook({
+      id: existing.id,
+      title,
+      authorName,
+      description,
+      ...fileDetails,
+    });
+
+    if (isReplacingFile && existing.fileKey && existing.fileKey !== book.fileKey) {
+      try {
+        await deleteManagedMediaObjectByKey(existing.fileKey);
+      } catch (error) {
+        console.warn("Không xóa được file ebook cũ trên S3", {
+          key: existing.fileKey,
+          error: error?.message || error,
+        });
+      }
+    }
+
+    await logActivity(req, {
+      actorUserId: req.auth.user.id,
+      action: "library.update",
+      resourceType: "library_book",
+      resourceId: book.id,
+      details: {
+        title: book.title,
+        format: book.fileFormat,
+        replacedFile: isReplacingFile,
+      },
+    });
+
+    res.json(book);
+  } catch (err) {
+    console.error("Lỗi chỉnh sửa sách trong thư viện", err);
+    res.status(500).json({ message: "Không chỉnh sửa được sách" });
+  }
+});
+
 app.delete("/api/library/:id", requireEditor, async (req, res) => {
   try {
     const existing = await db.getLibraryBookById(req.params.id);

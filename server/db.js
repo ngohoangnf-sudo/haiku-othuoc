@@ -2303,6 +2303,42 @@ async function insertLibraryBook(book) {
   return getLibraryBookById(book.id);
 }
 
+async function updateLibraryBook(book) {
+  await init();
+
+  const result = await pool.query(
+    `
+      UPDATE library_books
+      SET
+        title = $2,
+        author_name = $3,
+        description = $4,
+        file_url = $5,
+        file_key = $6,
+        file_format = $7,
+        mime_type = $8,
+        original_name = $9,
+        size_bytes = $10,
+        updated_at = NOW()
+      WHERE id = $1
+    `,
+    [
+      book.id,
+      book.title,
+      book.authorName || "",
+      book.description || "",
+      book.fileUrl,
+      book.fileKey || "",
+      book.fileFormat,
+      book.mimeType || null,
+      book.originalName || null,
+      book.sizeBytes ?? null,
+    ]
+  );
+
+  return result.rowCount ? getLibraryBookById(book.id) : null;
+}
+
 async function deleteLibraryBook(id) {
   await init();
 
@@ -2492,6 +2528,7 @@ module.exports = {
   getPagedLibraryBooks,
   getLibraryBookById,
   insertLibraryBook,
+  updateLibraryBook,
   deleteLibraryBook,
   seedIfEmpty,
   seedPostsIfMissing,
