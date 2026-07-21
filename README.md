@@ -220,6 +220,22 @@ aws cloudfront create-invalidation \
 
 `create-invalidation` is required because CloudFront may still serve cached copies of `index.html` and old bundles even after S3 has the new build.
 
+### One-command deploy after push
+
+Create the local deploy configuration once:
+
+```bash
+cp .env.deploy.example .env.deploy
+```
+
+Update the SSH key/host and AWS settings in `.env.deploy`, then deploy after committing and pushing `main`:
+
+```bash
+npm run deploy:prod
+```
+
+The script verifies that the working tree is clean and local `HEAD` matches `origin/main`, runs lint/build, optionally backs up PostgreSQL, updates and restarts the PM2 backend, checks `/api/health`, uploads `dist/spa` to S3, and invalidates CloudFront. The `ops/` S3 prefix is excluded from `--delete` by default so database backups are preserved.
+
 ### Lightsail instance
 
 Recommended instance:
