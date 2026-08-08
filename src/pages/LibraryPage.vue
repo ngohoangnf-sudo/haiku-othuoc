@@ -169,8 +169,17 @@
           <span class="library-upload__hint">
             Để trống để dùng bìa mặc định theo định dạng file.
           </span>
-          <div v-if="uploadForm.coverPreview" class="library-upload__cover-preview">
+          <div v-if="uploadForm.coverFile" class="library-upload__cover-preview">
+            <CoverCropper ref="coverCropper" :file="uploadForm.coverFile" />
+            <button type="button" class="library-upload__remove-cover" @click="removeCoverImage">
+              Gỡ ảnh bìa
+            </button>
+          </div>
+          <div v-else-if="uploadForm.coverPreview" class="library-upload__cover-preview">
             <img :src="uploadForm.coverPreview" alt="Xem trước ảnh bìa" />
+            <span class="library-upload__hint">
+              Chọn ảnh mới nếu muốn chỉnh lại khung hình.
+            </span>
             <button type="button" class="library-upload__remove-cover" @click="removeCoverImage">
               Gỡ ảnh bìa
             </button>
@@ -213,6 +222,7 @@ import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
 import { uploadEbookToLibrary, uploadImageToMediaStore } from "src/utils/mediaUpload";
 import PdfCoverThumb from "src/components/PdfCoverThumb.vue";
+import CoverCropper from "src/components/CoverCropper.vue";
 
 const FORMAT_OPTIONS = [
   { value: "", label: "Tất cả" },
@@ -227,6 +237,7 @@ export default defineComponent({
   name: "LibraryPage",
   components: {
     PdfCoverThumb,
+    CoverCropper,
   },
   setup() {
     const PAGE_SIZE = 12;
@@ -248,6 +259,7 @@ export default defineComponent({
     const editingBook = ref(null);
     const fileInput = ref(null);
     const coverInput = ref(null);
+    const coverCropper = ref(null);
     const uploadForm = reactive({
       title: "",
       authorName: "",
@@ -397,8 +409,13 @@ export default defineComponent({
 
       try {
         const uploaded = uploadForm.file ? await uploadEbookToLibrary(uploadForm.file) : null;
-        const uploadedCover = uploadForm.coverFile
-          ? await uploadImageToMediaStore(uploadForm.coverFile, { scope: "library-cover" })
+        // Upload the framed crop; fall back to the original if the canvas
+        // export fails for any reason.
+        const coverToUpload = uploadForm.coverFile
+          ? (await coverCropper.value?.getCroppedFile()) || uploadForm.coverFile
+          : null;
+        const uploadedCover = coverToUpload
+          ? await uploadImageToMediaStore(coverToUpload, { scope: "library-cover" })
           : null;
         const bookId = editingBook.value?.id || "";
 
@@ -521,6 +538,7 @@ export default defineComponent({
       uploadForm,
       fileInput,
       coverInput,
+      coverCropper,
       openUploadDialog,
       openEditDialog,
       closeUploadDialog,
