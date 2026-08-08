@@ -20,9 +20,11 @@
     <p v-else-if="loading" class="book-reader__status page-reading-copy">Đang tải sách...</p>
 
     <template v-if="book && !loading">
-      <div v-if="book.fileFormat === 'pdf'" class="book-reader__frame-wrap">
-        <iframe :src="book.fileUrl" class="book-reader__frame" :title="book.title"></iframe>
-      </div>
+      <PdfBookReader
+        v-if="book.fileFormat === 'pdf'"
+        :src="book.fileUrl"
+        :title="book.title"
+      />
 
       <div v-else-if="book.fileFormat === 'epub'" class="book-reader__epub">
         <p v-if="epubStatus" class="book-reader__status page-reading-copy">{{ epubStatus }}</p>
@@ -57,6 +59,7 @@
 <script>
 import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { useRoute } from "vue-router";
+import PdfBookReader from "src/components/PdfBookReader.vue";
 import { API_BASE } from "src/utils/runtime";
 
 const EPUB_SCRIPTS = [
@@ -88,6 +91,9 @@ function loadScript(src) {
 
 export default defineComponent({
   name: "BookReaderPage",
+  components: {
+    PdfBookReader,
+  },
   setup() {
     const route = useRoute();
     const book = ref(null);
@@ -273,20 +279,6 @@ export default defineComponent({
   color: #c89a93;
 }
 
-.book-reader__frame-wrap {
-  height: min(78vh, 900px);
-  border: 1px solid var(--border-regular);
-  border-radius: 0.6rem;
-  overflow: hidden;
-}
-
-.book-reader__frame {
-  width: 100%;
-  height: 100%;
-  border: none;
-  background: #fff;
-}
-
 .book-reader__epub {
   display: grid;
   gap: 1rem;
@@ -355,7 +347,6 @@ export default defineComponent({
     padding: 4.5rem 0 3rem;
   }
 
-  .book-reader__frame-wrap,
   .book-reader__epub-view {
     height: 70vh;
   }
