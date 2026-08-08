@@ -44,6 +44,19 @@
     <section v-if="books.length" class="library-page__list">
       <article v-for="book in books" :key="book.id" class="library-book-card">
         <router-link :to="`/library/${book.id}`" class="library-book-card__main">
+          <div class="library-book-card__cover">
+            <img
+              v-if="book.coverImage && !failedCoverIds.has(book.id)"
+              :src="book.coverImage"
+              :alt="`Bìa sách ${book.title}`"
+              loading="lazy"
+              @error="markCoverFailed(book.id)"
+            />
+            <div v-else class="library-book-card__cover-fallback" aria-hidden="true">
+              <span class="library-book-card__cover-format">{{ book.fileFormat.toUpperCase() }}</span>
+              <span class="library-book-card__cover-label">ebook</span>
+            </div>
+          </div>
           <div class="library-book-card__meta">
             <span class="library-book-card__format">{{ book.fileFormat.toUpperCase() }}</span>
             <span v-if="book.sizeBytes" aria-hidden="true">•</span>
@@ -133,6 +146,26 @@
           </span>
         </label>
 
+        <div class="library-upload__field">
+          <span class="library-upload__label">Ảnh bìa</span>
+          <input
+            ref="coverInput"
+            type="file"
+            class="library-upload__file"
+            accept="image/*"
+            @change="onCoverFileChange"
+          />
+          <span class="library-upload__hint">
+            Để trống để dùng bìa mặc định theo định dạng file.
+          </span>
+          <div v-if="uploadForm.coverPreview" class="library-upload__cover-preview">
+            <img :src="uploadForm.coverPreview" alt="Xem trước ảnh bìa" />
+            <button type="button" class="library-upload__remove-cover" @click="removeCoverImage">
+              Gỡ ảnh bìa
+            </button>
+          </div>
+        </div>
+
         <label class="library-upload__field">
           <span class="library-upload__label">Tên sách *</span>
           <input v-model.trim="uploadForm.title" type="text" class="library-upload__input" required />
@@ -164,10 +197,10 @@
 </template>
 
 <script>
-import { computed, defineComponent, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineComponent, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
-import { uploadEbookToLibrary } from "src/utils/mediaUpload";
+import { uploadEbookToLibrary, uploadImageToMediaStore } from "src/utils/mediaUpload";
 
 const FORMAT_OPTIONS = [
   { value: "", label: "Tất cả" },
@@ -192,21 +225,27 @@ export default defineComponent({
     const query = ref("");
     const selectedFormat = ref("");
     const deletingId = ref("");
+    const failedCoverIds = ref(new Set());
 
     const uploadDialogOpen = ref(false);
     const uploading = ref(false);
     const uploadError = ref("");
     const editingBook = ref(null);
     const fileInput = ref(null);
+    const coverInput = ref(null);
     const uploadForm = reactive({
       title: "",
       authorName: "",
       description: "",
       file: null,
+      coverFile: null,
+      coverImage: "",
+      coverPreview: "",
     });
 
     let searchTimer = null;
     let requestId = 0;
+    let coverObjectUrl = "";
 
     const canManage = computed(() => authStore.canEdit());
     const supportedFormatsLabel = "PDF, EPUB, MOBI, AZW3, TXT";
@@ -234,6 +273,7 @@ export default defineComponent({
         if (currentRequest !== requestId) return;
 
         books.value = Array.isArray(data.items) ? data.items : [];
+        failedCoverIds.value = new Set();
         total.value = Number(data.total) || 0;
         page.value = Number(data.page) || 1;
         totalPages.value = Number(data.totalPages) || 1;
@@ -252,6 +292,21 @@ export default defineComponent({
       loadBooks(targetPage);
     }
 
+    function releaseCoverObjectUrl() {
+      if (coverObjectUrl) {
+        URL.revokeObjectURL(coverObjectUrl);
+        coverObjectUrl = "";
+      }
+    }
+
+    function resetCoverState(image = "") {
+      releaseCoverObjectUrl();
+      uploadForm.coverFile = null;
+      uploadForm.coverImage = image;
+      uploadForm.coverPreview = image;
+      if (coverInput.value) coverInput.value.value = "";
+    }
+
     function openUploadDialog() {
       uploadError.value = "";
       editingBook.value = null;
@@ -259,6 +314,7 @@ export default defineComponent({
       uploadForm.authorName = "";
       uploadForm.description = "";
       uploadForm.file = null;
+      resetCoverState();
       uploadDialogOpen.value = true;
     }
 
@@ -269,6 +325,7 @@ export default defineComponent({
       uploadForm.authorName = book.authorName || "";
       uploadForm.description = book.description || "";
       uploadForm.file = null;
+      resetCoverState(book.coverImage || "");
       uploadDialogOpen.value = true;
     }
 
@@ -276,6 +333,7 @@ export default defineComponent({
       if (uploading.value) return;
       uploadDialogOpen.value = false;
       editingBook.value = null;
+      resetCoverState();
     }
 
     function onFileChange(event) {
@@ -284,6 +342,29 @@ export default defineComponent({
       if (file && !uploadForm.title) {
         uploadForm.title = file.name.replace(/\.[^.]+$/, "").replace(/[-_]+/g, " ").trim();
       }
+    }
+
+    function onCoverFileChange(event) {
+      const file = event.target?.files?.[0] || null;
+      releaseCoverObjectUrl();
+      uploadForm.coverFile = file;
+
+      if (file) {
+        coverObjectUrl = URL.createObjectURL(file);
+        uploadForm.coverPreview = coverObjectUrl;
+      } else {
+        uploadForm.coverPreview = uploadForm.coverImage;
+      }
+    }
+
+    function removeCoverImage() {
+      resetCoverState();
+    }
+
+    function markCoverFailed(bookId) {
+      const next = new Set(failedCoverIds.value);
+      next.add(bookId);
+      failedCoverIds.value = next;
     }
 
     async function submitUpload() {
@@ -301,6 +382,9 @@ export default defineComponent({
 
       try {
         const uploaded = uploadForm.file ? await uploadEbookToLibrary(uploadForm.file) : null;
+        const uploadedCover = uploadForm.coverFile
+          ? await uploadImageToMediaStore(uploadForm.coverFile, { scope: "library-cover" })
+          : null;
         const bookId = editingBook.value?.id || "";
 
         const response = await fetch(
@@ -312,6 +396,7 @@ export default defineComponent({
               title: uploadForm.title,
               authorName: uploadForm.authorName,
               description: uploadForm.description,
+              coverImage: uploadedCover?.url || uploadForm.coverImage,
               ...(uploaded
                 ? {
                     fileUrl: uploaded.url,
@@ -332,6 +417,7 @@ export default defineComponent({
 
         uploadDialogOpen.value = false;
         editingBook.value = null;
+        resetCoverState();
         await loadBooks(bookId ? page.value : 1);
       } catch (err) {
         uploadError.value = err.message || "Không lưu được ebook.";
@@ -392,6 +478,11 @@ export default defineComponent({
       loadBooks(1);
     });
 
+    onBeforeUnmount(() => {
+      if (searchTimer) clearTimeout(searchTimer);
+      releaseCoverObjectUrl();
+    });
+
     return {
       books,
       total,
@@ -403,6 +494,7 @@ export default defineComponent({
       query,
       selectedFormat,
       deletingId,
+      failedCoverIds,
       formatOptions: FORMAT_OPTIONS,
       canManage,
       supportedFormatsLabel,
@@ -413,10 +505,14 @@ export default defineComponent({
       editingBook,
       uploadForm,
       fileInput,
+      coverInput,
       openUploadDialog,
       openEditDialog,
       closeUploadDialog,
       onFileChange,
+      onCoverFileChange,
+      removeCoverImage,
+      markCoverFailed,
       submitUpload,
       removeBook,
       goToPage,
@@ -564,6 +660,49 @@ export default defineComponent({
   display: grid;
   gap: 0.5rem;
   align-content: start;
+}
+
+.library-book-card__cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  margin-bottom: 0.65rem;
+  overflow: hidden;
+  background: rgb(var(--color-text-rgb) / 0.055);
+}
+
+.library-book-card__cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.library-book-card__cover-fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 1.2rem;
+  color: var(--color-muted);
+  background:
+    linear-gradient(145deg, transparent 0 56%, rgb(var(--color-text-rgb) / 0.065) 56% 57%, transparent 57%),
+    linear-gradient(160deg, rgb(var(--color-text-rgb) / 0.08), transparent 55%);
+  border: 1px solid rgb(var(--color-text-rgb) / 0.1);
+}
+
+.library-book-card__cover-format {
+  align-self: flex-start;
+  font-size: clamp(1.5rem, 4vw, 2.4rem);
+  letter-spacing: 0.08em;
+}
+
+.library-book-card__cover-label {
+  align-self: flex-end;
+  font-size: 0.72rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-muted-faint);
 }
 
 .library-book-card__meta {
@@ -746,6 +885,36 @@ export default defineComponent({
   color: var(--color-muted-faint);
   font-size: 0.78rem;
   line-height: 1.4;
+}
+
+.library-upload__cover-preview {
+  display: flex;
+  align-items: flex-end;
+  gap: 1rem;
+  margin-top: 0.3rem;
+}
+
+.library-upload__cover-preview img {
+  width: 5.25rem;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border: 1px solid rgb(var(--color-text-rgb) / 0.15);
+}
+
+.library-upload__remove-cover {
+  border: none;
+  border-bottom: 1px solid currentColor;
+  padding: 0 0 0.15rem;
+  background: none;
+  color: var(--color-muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.library-upload__remove-cover:hover,
+.library-upload__remove-cover:focus-visible {
+  color: #c89a93;
 }
 
 .library-upload__actions {

@@ -274,6 +274,10 @@ async function init() {
       ADD COLUMN IF NOT EXISTS view_count INTEGER NOT NULL DEFAULT 0
     `);
     await pool.query(`
+      ALTER TABLE library_books
+      ADD COLUMN IF NOT EXISTS cover_media_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL
+    `);
+    await pool.query(`
       UPDATE essays
       SET kind = 'commentary'
       WHERE kind IS NULL OR kind = ''
@@ -479,6 +483,7 @@ async function isMediaSourceReferenced(source) {
               EXISTS (SELECT 1 FROM poems p WHERE p.media_asset_id = m.id)
               OR EXISTS (SELECT 1 FROM essays e WHERE e.cover_media_id = m.id)
               OR EXISTS (SELECT 1 FROM haiku_other_posts h WHERE h.cover_media_id = m.id)
+              OR EXISTS (SELECT 1 FROM library_books b WHERE b.cover_media_id = m.id)
               OR EXISTS (SELECT 1 FROM authors a WHERE a.avatar_media_id = m.id)
             )
         )
@@ -526,6 +531,11 @@ async function deleteOrphanMediaAssetsBySource(source) {
           SELECT 1
           FROM haiku_other_posts h
           WHERE h.cover_media_id = m.id
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM library_books b
+          WHERE b.cover_media_id = m.id
         )
         AND NOT EXISTS (
           SELECT 1
@@ -2177,6 +2187,7 @@ function mapLibraryBookRow(row) {
     mimeType: row.mimeType || "",
     originalName: row.originalName || "",
     sizeBytes: row.sizeBytes === null || row.sizeBytes === undefined ? null : Number(row.sizeBytes),
+    coverImage: row.coverImage || "",
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     uploadedBy: row.uploadedByDisplayName || row.uploadedByUsername || "",
@@ -2195,12 +2206,14 @@ const LIBRARY_BOOK_SELECT = `
     b.mime_type AS "mimeType",
     b.original_name AS "originalName",
     b.size_bytes AS "sizeBytes",
+    COALESCE(m.source, '') AS "coverImage",
     b.created_at AS "createdAt",
     b.updated_at AS "updatedAt",
     u.username AS "uploadedByUsername",
     u.display_name AS "uploadedByDisplayName"
   FROM library_books b
   LEFT JOIN users u ON u.id = b.created_by_user_id
+  LEFT JOIN media_assets m ON m.id = b.cover_media_id
 `;
 
 async function getPagedLibraryBooks(filters = {}, pagination = {}) {
@@ -2266,77 +2279,110 @@ async function getLibraryBookById(id) {
 }
 
 async function insertLibraryBook(book) {
-  await init();
+  return withClient(async (client) => {
+    await client.query("BEGIN");
 
-  await pool.query(
-    `
-      INSERT INTO library_books (
-        id,
-        title,
-        author_name,
-        description,
-        file_url,
-        file_key,
-        file_format,
-        mime_type,
-        original_name,
-        size_bytes,
-        created_by_user_id
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-    `,
-    [
-      book.id,
-      book.title,
-      book.authorName || "",
-      book.description || "",
-      book.fileUrl,
-      book.fileKey || "",
-      book.fileFormat,
-      book.mimeType || null,
-      book.originalName || null,
-      book.sizeBytes ?? null,
-      book.createdByUserId || null,
-    ]
-  );
-
-  return getLibraryBookById(book.id);
+    try {
+      const coverMediaId = await ensureMediaAsset(client, book.coverImage);
+      await client.query(
+        `
+          INSERT INTO library_books (
+            id,
+            title,
+            author_name,
+            description,
+            file_url,
+            file_key,
+            file_format,
+            mime_type,
+            original_name,
+            size_bytes,
+            cover_media_id,
+            created_by_user_id
+          )
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        `,
+        [
+          book.id,
+          book.title,
+          book.authorName || "",
+          book.description || "",
+          book.fileUrl,
+          book.fileKey || "",
+          book.fileFormat,
+          book.mimeType || null,
+          book.originalName || null,
+          book.sizeBytes ?? null,
+          coverMediaId,
+          book.createdByUserId || null,
+        ]
+      );
+      await client.query("COMMIT");
+      return getLibraryBookById(book.id);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  });
 }
 
 async function updateLibraryBook(book) {
-  await init();
+  return withClient(async (client) => {
+    await client.query("BEGIN");
 
-  const result = await pool.query(
-    `
-      UPDATE library_books
-      SET
-        title = $2,
-        author_name = $3,
-        description = $4,
-        file_url = $5,
-        file_key = $6,
-        file_format = $7,
-        mime_type = $8,
-        original_name = $9,
-        size_bytes = $10,
-        updated_at = NOW()
-      WHERE id = $1
-    `,
-    [
-      book.id,
-      book.title,
-      book.authorName || "",
-      book.description || "",
-      book.fileUrl,
-      book.fileKey || "",
-      book.fileFormat,
-      book.mimeType || null,
-      book.originalName || null,
-      book.sizeBytes ?? null,
-    ]
-  );
+    try {
+      const existing = await client.query(
+        `SELECT cover_media_id AS "coverMediaId" FROM library_books WHERE id = $1`,
+        [book.id]
+      );
+      if (!existing.rowCount) {
+        await client.query("ROLLBACK");
+        return null;
+      }
 
-  return result.rowCount ? getLibraryBookById(book.id) : null;
+      const coverMediaId = await ensureMediaAsset(
+        client,
+        book.coverImage,
+        existing.rows[0].coverMediaId
+      );
+      await client.query(
+        `
+          UPDATE library_books
+          SET
+            title = $2,
+            author_name = $3,
+            description = $4,
+            file_url = $5,
+            file_key = $6,
+            file_format = $7,
+            mime_type = $8,
+            original_name = $9,
+            size_bytes = $10,
+            cover_media_id = $11,
+            updated_at = NOW()
+          WHERE id = $1
+        `,
+        [
+          book.id,
+          book.title,
+          book.authorName || "",
+          book.description || "",
+          book.fileUrl,
+          book.fileKey || "",
+          book.fileFormat,
+          book.mimeType || null,
+          book.originalName || null,
+          book.sizeBytes ?? null,
+          coverMediaId,
+        ]
+      );
+      await client.query("COMMIT");
+      return getLibraryBookById(book.id);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      throw error;
+    }
+  });
 }
 
 async function deleteLibraryBook(id) {

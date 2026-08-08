@@ -1093,6 +1093,8 @@ app.post("/api/library", requireEditor, async (req, res) => {
         LIBRARY_EBOOK_FORMATS[format],
       originalName: originalName || null,
       sizeBytes: Number.isFinite(sizeBytes) && sizeBytes > 0 ? sizeBytes : null,
+      coverImage:
+        typeof req.body?.coverImage === "string" ? req.body.coverImage.trim() : "",
       createdByUserId: req.auth.user.id,
     });
 
@@ -1173,8 +1175,16 @@ app.put("/api/library/:id", requireEditor, async (req, res) => {
       title,
       authorName,
       description,
+      coverImage:
+        typeof req.body?.coverImage === "string"
+          ? req.body.coverImage.trim()
+          : existing.coverImage,
       ...fileDetails,
     });
+    const removedMediaSources = subtractMediaSources(
+      collectLibraryBookMediaSources(existing),
+      collectLibraryBookMediaSources(book)
+    );
 
     if (isReplacingFile && existing.fileKey && existing.fileKey !== book.fileKey) {
       try {
@@ -1198,6 +1208,7 @@ app.put("/api/library/:id", requireEditor, async (req, res) => {
         replacedFile: isReplacingFile,
       },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
 
     res.json(book);
   } catch (err) {
@@ -1213,6 +1224,7 @@ app.delete("/api/library/:id", requireEditor, async (req, res) => {
       return res.status(404).json({ message: "Không tìm thấy sách để xóa" });
     }
 
+    const removedMediaSources = collectLibraryBookMediaSources(existing);
     await db.deleteLibraryBook(existing.id);
 
     if (existing.fileKey) {
@@ -1233,6 +1245,7 @@ app.delete("/api/library/:id", requireEditor, async (req, res) => {
       resourceId: existing.id,
       details: { title: existing.title, format: existing.fileFormat },
     });
+    await cleanupUnusedMediaSources(removedMediaSources);
 
     res.status(204).end();
   } catch (err) {
@@ -2330,6 +2343,8 @@ function normalizeMediaUploadScope(value = "") {
       return "haiku-other/covers";
     case "haiku-other-inline":
       return "haiku-other/inline";
+    case "library-cover":
+      return "library/covers";
     case "submission-cover":
       return "submissions/covers";
     case "submission-inline":
@@ -2502,6 +2517,11 @@ function collectHaikuOtherMediaSources(post) {
   });
 
   return [...sources];
+}
+
+function collectLibraryBookMediaSources(book) {
+  const coverImage = normalizeMediaSourceValue(book?.coverImage || "");
+  return coverImage ? [coverImage] : [];
 }
 
 function subtractMediaSources(previousSources = [], nextSources = []) {

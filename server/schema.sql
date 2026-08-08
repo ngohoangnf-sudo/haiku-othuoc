@@ -146,6 +146,7 @@ CREATE TABLE IF NOT EXISTS library_books (
   mime_type TEXT,
   original_name TEXT,
   size_bytes BIGINT,
+  cover_media_id TEXT REFERENCES media_assets(id) ON DELETE SET NULL,
   created_by_user_id TEXT REFERENCES users(id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
