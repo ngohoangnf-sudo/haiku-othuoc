@@ -15,12 +15,34 @@ const THUMB_WIDTH = 420;
 // Only a couple of PDFs are fetched at a time so a library page full of
 // cover-less books doesn't open a request per card at once.
 const MAX_CONCURRENT = 2;
+// Building a cover costs a full download of the book (about twice its size in
+// practice), so skip it for anything big and leave the format badge instead.
+// Those books want a real cover uploaded rather than one derived per visitor.
+const MAX_SOURCE_BYTES = 3 * 1024 * 1024;
+const STORAGE_PREFIX = "pdf-cover:";
 
-// Thumbnails survive navigation within the session, so going back to the
-// library doesn't re-download anything.
 const cache = new Map();
 const queue = [];
 let active = 0;
+
+// Covers are kept per browser, not just per session, so a return visit never
+// re-downloads a book it has already rendered.
+function readStored(src) {
+  try {
+    return window.localStorage.getItem(STORAGE_PREFIX + src) || "";
+  } catch (_error) {
+    return "";
+  }
+}
+
+function writeStored(src, value) {
+  if (!value) return;
+  try {
+    window.localStorage.setItem(STORAGE_PREFIX + src, value);
+  } catch (_error) {
+    // Out of quota or storage disabled — the in-memory cache still applies.
+  }
+}
 
 function runNext() {
   if (active >= MAX_CONCURRENT) return;
@@ -51,17 +73,22 @@ export default defineComponent({
       type: String,
       default: "",
     },
+    sizeBytes: {
+      type: Number,
+      default: 0,
+    },
   },
   setup(props) {
     const root = ref(null);
-    const dataUrl = ref(cache.get(props.src) || "");
+    const tooLarge = props.sizeBytes > MAX_SOURCE_BYTES;
+    const dataUrl = ref(tooLarge ? "" : cache.get(props.src) ?? readStored(props.src));
     let observer = null;
     let cancelled = false;
 
     async function generate() {
       if (cancelled || dataUrl.value) return;
       const cached = cache.get(props.src);
-      if (cached) {
+      if (cached !== undefined) {
         dataUrl.value = cached;
         return;
       }
@@ -69,11 +96,12 @@ export default defineComponent({
       const result = await schedule(() => renderPdfFirstPage(props.src, THUMB_WIDTH));
       // Cache failures as "" too, so a broken file isn't retried on every scroll.
       cache.set(props.src, result);
+      writeStored(props.src, result);
       if (!cancelled) dataUrl.value = result;
     }
 
     onMounted(() => {
-      if (dataUrl.value) return;
+      if (tooLarge || dataUrl.value) return;
 
       // Fall back to rendering immediately if we can't observe visibility.
       if (typeof IntersectionObserver === "undefined" || !root.value) {

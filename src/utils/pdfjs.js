@@ -26,9 +26,11 @@ export function loadPdfjs() {
 // that were uploaded without one.
 export async function renderPdfFirstPage(url, width = 420) {
   const pdfjs = await loadPdfjs();
-  // disableAutoFetch/disableStream keep pdf.js on ranged requests so only the
-  // chunks needed for page 1 are downloaded, not the whole book.
-  const task = pdfjs.getDocument({ url, disableAutoFetch: true, disableStream: true });
+  // Ranged fetching buys nothing here: these books aren't linearized, so pdf.js
+  // reads most of the file before it can lay out page 1 (measured at roughly
+  // twice the file size, whatever the range/stream options). Callers must keep
+  // the source small enough that a full download is acceptable.
+  const task = pdfjs.getDocument({ url });
 
   let doc = null;
   try {

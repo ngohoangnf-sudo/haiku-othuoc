@@ -56,6 +56,7 @@
               v-else-if="book.fileFormat === 'pdf'"
               :src="book.fileUrl"
               :alt="`Bìa sách ${book.title}`"
+              :size-bytes="book.sizeBytes || 0"
             >
               <div class="library-book-card__cover-fallback" aria-hidden="true">
                 <span class="library-book-card__cover-format">{{ book.fileFormat.toUpperCase() }}</span>
