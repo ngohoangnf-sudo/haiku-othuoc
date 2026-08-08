@@ -4,33 +4,15 @@
       {{ status || "Đang chuẩn bị trình đọc PDF..." }}
     </p>
 
-    <div v-if="ready" class="pdf-reader__controls" aria-label="Điều khiển PDF">
-      <button
-        type="button"
-        class="pdf-reader__control"
-        :disabled="pageNumber <= 1 || Boolean(status)"
-        @click="changePage(-1)"
-      >
-        ← Trang trước
-      </button>
-
-      <span class="pdf-reader__page">{{ pageNumber }} / {{ pageCount }}</span>
-
-      <button
-        type="button"
-        class="pdf-reader__control"
-        :disabled="pageNumber >= pageCount || Boolean(status)"
-        @click="changePage(1)"
-      >
-        Trang sau →
-      </button>
+    <div v-if="ready && !error" class="pdf-reader__controls" aria-label="Điều khiển PDF">
+      <span class="pdf-reader__page">Trang {{ currentPage }} / {{ pageCount }}</span>
 
       <span class="pdf-reader__separator" aria-hidden="true"></span>
 
       <button
         type="button"
         class="pdf-reader__control pdf-reader__control--zoom"
-        :disabled="zoom <= MIN_ZOOM || Boolean(status)"
+        :disabled="zoom <= MIN_ZOOM"
         aria-label="Thu nhỏ"
         @click="changeZoom(-ZOOM_STEP)"
       >
@@ -40,21 +22,24 @@
       <button
         type="button"
         class="pdf-reader__control pdf-reader__control--zoom"
-        :disabled="zoom >= MAX_ZOOM || Boolean(status)"
+        :disabled="zoom >= MAX_ZOOM"
         aria-label="Phóng to"
         @click="changeZoom(ZOOM_STEP)"
       >
         +
       </button>
+      <button
+        v-if="zoom !== 1"
+        type="button"
+        class="pdf-reader__control pdf-reader__control--reset"
+        @click="resetZoom"
+      >
+        Vừa khung
+      </button>
     </div>
 
-    <div v-show="ready && !error" ref="viewport" class="pdf-reader__viewport">
-      <canvas
-        ref="canvas"
-        class="pdf-reader__canvas"
-        role="img"
-        :aria-label="`${title}, trang ${pageNumber} trên ${pageCount}`"
-      ></canvas>
+    <div v-show="ready && !error" ref="scroller" class="pdf-reader__scroller">
+      <div ref="pagesEl" class="pdf-reader__pages"></div>
     </div>
 
     <div v-if="error" class="pdf-reader__fallback">
@@ -67,14 +52,16 @@
 </template>
 
 <script>
-import { computed, defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 
-const MIN_ZOOM = 0.75;
-const MAX_ZOOM = 2;
-const ZOOM_STEP = 0.25;
+const MIN_ZOOM = 0.6;
+const MAX_ZOOM = 3;
+const ZOOM_STEP = 0.2;
+const MAX_PAGE_WIDTH = 860; // css px – comfortable reading column on desktop
 const MAX_PIXEL_RATIO = 2;
-const MAX_CANVAS_DIMENSION = 4096;
 const MAX_CANVAS_PIXELS = 16_000_000;
+// Render / keep pages within this vertical distance of the viewport.
+const RENDER_MARGIN = "1400px";
 
 export default defineComponent({
   name: "PdfBookReader",
@@ -89,28 +76,40 @@ export default defineComponent({
     },
   },
   setup(props) {
-    const viewport = ref(null);
-    const canvas = ref(null);
+    const scroller = ref(null);
+    const pagesEl = ref(null);
     const loading = ref(true);
     const status = ref("Đang chuẩn bị trình đọc PDF...");
     const error = ref("");
-    const pageNumber = ref(1);
+    const ready = ref(false);
     const pageCount = ref(0);
+    const currentPage = ref(1);
     const zoom = ref(1);
-    const ready = computed(() => pageCount.value > 0);
 
+    let pdfjs = null;
     let pdfDocument = null;
     let loadingTask = null;
-    let renderTask = null;
+    let renderObserver = null;
     let resizeObserver = null;
     let resizeTimer = null;
-    let renderSequence = 0;
-    let previousWidth = 0;
+    let scrollFrame = 0;
+
+    // Per-page bookkeeping. states[i] -> descriptor for page i + 1.
+    const states = [];
+    const pageCache = new Map();
+
+    function getPage(num) {
+      let promise = pageCache.get(num);
+      if (!promise) {
+        promise = pdfDocument.getPage(num);
+        pageCache.set(num, promise);
+      }
+      return promise;
+    }
 
     function getAvailableWidth() {
-      const element = viewport.value;
-      if (!element) return 0;
-
+      const element = pagesEl.value;
+      if (!element || !element.clientWidth) return 0;
       const styles = window.getComputedStyle(element);
       const horizontalPadding =
         (Number.parseFloat(styles.paddingLeft) || 0) +
@@ -118,125 +117,273 @@ export default defineComponent({
       return Math.max(1, element.clientWidth - horizontalPadding);
     }
 
-    async function renderPage() {
-      if (!pdfDocument || !canvas.value || !viewport.value) return;
+    function getBaseFitWidth() {
+      // Fall back to a sane width if the container hasn't been laid out yet
+      // (width 0). The ResizeObserver re-renders once the real width is known.
+      const available = getAvailableWidth() || MAX_PAGE_WIDTH;
+      return Math.min(available, MAX_PAGE_WIDTH);
+    }
 
-      const sequence = ++renderSequence;
-      renderTask?.cancel();
-      status.value = `Đang tải trang ${pageNumber.value}...`;
-      error.value = "";
-      let page = null;
+    // Size (and set the css scale on) a page wrapper so it reserves the
+    // correct space before its canvas is rendered.
+    function layoutPage(state) {
+      const displayWidth = getBaseFitWidth() * zoom.value;
+      const cssScale = displayWidth / state.baseW;
+      state.displayWidth = displayWidth;
+      state.el.style.width = `${Math.floor(displayWidth)}px`;
+      state.el.style.height = `${Math.round(displayWidth * (state.baseH / state.baseW))}px`;
+      state.el.style.setProperty("--scale-factor", String(cssScale));
+      return cssScale;
+    }
+
+    function computeOutputScale(viewport) {
+      const maxPixelScale = Math.sqrt(
+        MAX_CANVAS_PIXELS / (viewport.width * viewport.height)
+      );
+      return Math.max(
+        0.1,
+        Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO, maxPixelScale)
+      );
+    }
+
+    async function renderPage(state) {
+      if (state.rendered || state.rendering || !pdfDocument) return;
+      state.rendering = true;
+      const seq = ++state.seq;
 
       try {
-        page = await pdfDocument.getPage(pageNumber.value);
-        if (sequence !== renderSequence) return;
+        const page = await getPage(state.num);
+        if (seq !== state.seq) return;
 
-        const initialViewport = page.getViewport({ scale: 1 });
-        const fitScale = getAvailableWidth() / initialViewport.width;
-        const pageViewport = page.getViewport({ scale: fitScale * zoom.value });
-        const maxDimensionScale =
-          MAX_CANVAS_DIMENSION / Math.max(pageViewport.width, pageViewport.height);
-        const maxPixelScale = Math.sqrt(
-          MAX_CANVAS_PIXELS / (pageViewport.width * pageViewport.height)
-        );
-        const outputScale = Math.max(
-          0.1,
-          Math.min(
-            window.devicePixelRatio || 1,
-            MAX_PIXEL_RATIO,
-            maxDimensionScale,
-            maxPixelScale
-          )
-        );
-        const context = canvas.value.getContext("2d", { alpha: false });
+        // Correct the reserved size once we know the real page dimensions.
+        const base = page.getViewport({ scale: 1 });
+        state.baseW = base.width;
+        state.baseH = base.height;
+        const cssScale = layoutPage(state);
 
-        if (!context) {
-          throw new Error("Không khởi tạo được vùng hiển thị PDF.");
-        }
+        const viewport = page.getViewport({ scale: cssScale });
+        const outputScale = computeOutputScale(viewport);
 
-        canvas.value.width = Math.max(1, Math.floor(pageViewport.width * outputScale));
-        canvas.value.height = Math.max(1, Math.floor(pageViewport.height * outputScale));
-        canvas.value.style.width = `${Math.floor(pageViewport.width)}px`;
-        canvas.value.style.height = `${Math.floor(pageViewport.height)}px`;
+        const canvas = document.createElement("canvas");
+        canvas.className = "pdf-page__canvas";
+        canvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        canvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        const context = canvas.getContext("2d", { alpha: false });
+        if (!context) throw new Error("no-2d-context");
 
-        renderTask = page.render({
+        state.renderTask = page.render({
           canvasContext: context,
-          viewport: pageViewport,
+          viewport,
           transform: outputScale === 1 ? null : [outputScale, 0, 0, outputScale, 0, 0],
         });
-        await renderTask.promise;
+        await state.renderTask.promise;
+        if (seq !== state.seq) return;
 
-        if (sequence === renderSequence) {
-          status.value = "";
+        // Selectable text overlay, positioned on top of the canvas.
+        const textDiv = document.createElement("div");
+        textDiv.className = "textLayer";
+        const textLayer = new pdfjs.TextLayer({
+          textContentSource: page.streamTextContent(),
+          container: textDiv,
+          viewport,
+        });
+        await textLayer.render();
+        if (seq !== state.seq) {
+          textLayer.cancel?.();
+          return;
         }
+
+        state.el.replaceChildren(canvas, textDiv);
+        state.canvas = canvas;
+        state.textLayer = textLayer;
+        state.rendered = true;
       } catch (err) {
-        if (err?.name === "RenderingCancelledException" || sequence !== renderSequence) return;
-        status.value = "";
-        error.value =
-          err?.message && err.message.startsWith("Không")
-            ? err.message
-            : "Không render được PDF. Có thể file hoặc cấu hình CORS của media server chưa hợp lệ.";
+        if (err?.name === "RenderingCancelledException" || seq !== state.seq) return;
+        // Leave the placeholder in place; a single failed page shouldn't break the book.
       } finally {
-        page?.cleanup();
+        state.rendering = false;
       }
     }
 
-    async function changePage(offset) {
-      const nextPage = Math.min(pageCount.value, Math.max(1, pageNumber.value + offset));
-      if (nextPage === pageNumber.value) return;
-
-      pageNumber.value = nextPage;
-      viewport.value?.scrollTo({ top: 0, left: 0 });
-      await renderPage();
+    function teardownPage(state) {
+      state.seq += 1;
+      state.rendering = false;
+      try {
+        state.renderTask?.cancel();
+      } catch (_error) {
+        // ignore
+      }
+      state.renderTask = null;
+      try {
+        state.textLayer?.cancel?.();
+      } catch (_error) {
+        // ignore
+      }
+      state.textLayer = null;
+      if (state.canvas) {
+        state.canvas.width = 0;
+        state.canvas.height = 0;
+        state.canvas = null;
+      }
+      state.el.replaceChildren();
+      state.rendered = false;
     }
 
-    async function changeZoom(offset) {
-      const nextZoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom.value + offset));
-      if (nextZoom === zoom.value) return;
+    function updateCurrentPage() {
+      const target = window.innerHeight / 2;
+      let best = currentPage.value;
+      let bestDistance = Infinity;
+      for (const state of states) {
+        const rect = state.el.getBoundingClientRect();
+        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
+        const center = rect.top + rect.height / 2;
+        const distance = Math.abs(center - target);
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          best = state.num;
+        }
+      }
+      if (best !== currentPage.value) currentPage.value = best;
+    }
 
-      zoom.value = nextZoom;
-      await renderPage();
+    function onScroll() {
+      if (scrollFrame) return;
+      scrollFrame = window.requestAnimationFrame(() => {
+        scrollFrame = 0;
+        updateCurrentPage();
+      });
     }
 
     function onKeydown(event) {
       if (!ready.value || event.altKey || event.ctrlKey || event.metaKey) return;
-      if (event.key === "ArrowLeft") changePage(-1);
-      if (event.key === "ArrowRight") changePage(1);
+      if (event.target instanceof HTMLElement && /^(INPUT|TEXTAREA)$/.test(event.target.tagName)) {
+        return;
+      }
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const delta = event.key === "ArrowRight" ? 1 : -1;
+        const next = Math.min(pageCount.value, Math.max(1, currentPage.value + delta));
+        const state = states[next - 1];
+        if (state) {
+          event.preventDefault();
+          state.el.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
     }
 
-    function observeWidth() {
-      if (!viewport.value || typeof ResizeObserver === "undefined") return;
-
-      resizeObserver = new ResizeObserver(([entry]) => {
-        const width = Math.round(entry?.contentRect?.width || 0);
-        if (!width || width === previousWidth) return;
-        previousWidth = width;
-
-        window.clearTimeout(resizeTimer);
-        resizeTimer = window.setTimeout(() => renderPage(), 120);
+    function relayoutAll() {
+      const anchor = currentPage.value;
+      for (const state of states) {
+        // Re-render at the new scale for crispness.
+        teardownPage(state);
+        layoutPage(state);
+        renderObserver?.observe(state.el);
+      }
+      // Keep the reader anchored to the page the user was on.
+      nextTick(() => {
+        states[anchor - 1]?.el.scrollIntoView({ block: "start" });
       });
-      resizeObserver.observe(viewport.value);
+    }
+
+    async function changeZoom(offset) {
+      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((zoom.value + offset).toFixed(2))));
+      if (next === zoom.value) return;
+      zoom.value = next;
+      relayoutAll();
+    }
+
+    function resetZoom() {
+      if (zoom.value === 1) return;
+      zoom.value = 1;
+      relayoutAll();
+    }
+
+    function buildPages(firstBase) {
+      const fragment = document.createDocumentFragment();
+      for (let num = 1; num <= pageCount.value; num += 1) {
+        const el = document.createElement("div");
+        el.className = "pdf-page";
+        el.dataset.page = String(num);
+        const state = {
+          num,
+          el,
+          baseW: firstBase.width,
+          baseH: firstBase.height,
+          displayWidth: 0,
+          canvas: null,
+          textLayer: null,
+          renderTask: null,
+          rendered: false,
+          rendering: false,
+          seq: 0,
+        };
+        layoutPage(state);
+        states.push(state);
+        fragment.appendChild(el);
+      }
+      pagesEl.value.appendChild(fragment);
+    }
+
+    function observePages() {
+      renderObserver = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const num = Number(entry.target.dataset.page);
+            const state = states[num - 1];
+            if (!state) continue;
+            if (entry.isIntersecting) {
+              renderPage(state);
+            } else {
+              teardownPage(state);
+            }
+          }
+        },
+        { root: null, rootMargin: `${RENDER_MARGIN} 0px`, threshold: 0 }
+      );
+      for (const state of states) renderObserver.observe(state.el);
+    }
+
+    function observeResize() {
+      if (typeof ResizeObserver === "undefined") return;
+      let previousWidth = getAvailableWidth();
+      resizeObserver = new ResizeObserver(() => {
+        const width = getAvailableWidth();
+        if (Math.abs(width - previousWidth) < 1) return;
+        previousWidth = width;
+        window.clearTimeout(resizeTimer);
+        resizeTimer = window.setTimeout(() => relayoutAll(), 150);
+      });
+      resizeObserver.observe(pagesEl.value);
     }
 
     async function loadPdf() {
       try {
-        const [pdfjs, workerModule] = await Promise.all([
+        const [pdfModule, workerModule] = await Promise.all([
           import("pdfjs-dist/legacy/build/pdf.mjs"),
           import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"),
         ]);
-
+        pdfjs = pdfModule;
         pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default;
+
         loadingTask = pdfjs.getDocument({ url: props.src });
         pdfDocument = await loadingTask.promise;
         pageCount.value = pdfDocument.numPages;
+
+        const firstPage = await getPage(1);
+        const firstBase = firstPage.getViewport({ scale: 1 });
+
         loading.value = false;
+        status.value = "";
+        ready.value = true;
 
         await nextTick();
-        observeWidth();
-        await renderPage();
+        buildPages(firstBase);
+        observePages();
+        observeResize();
+        updateCurrentPage();
       } catch (_error) {
         loading.value = false;
         status.value = "";
+        ready.value = false;
         error.value =
           "Không tải được PDF trong trình đọc. Hãy thử mở trực tiếp hoặc kiểm tra CORS của media server.";
       }
@@ -244,15 +391,18 @@ export default defineComponent({
 
     onMounted(() => {
       window.addEventListener("keydown", onKeydown);
+      window.addEventListener("scroll", onScroll, { passive: true });
       loadPdf();
     });
 
     onBeforeUnmount(() => {
-      renderSequence += 1;
       window.removeEventListener("keydown", onKeydown);
+      window.removeEventListener("scroll", onScroll);
       window.clearTimeout(resizeTimer);
+      if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
+      renderObserver?.disconnect();
       resizeObserver?.disconnect();
-      renderTask?.cancel();
+      for (const state of states) teardownPage(state);
       if (pdfDocument) {
         pdfDocument.destroy();
       } else {
@@ -264,17 +414,17 @@ export default defineComponent({
       MIN_ZOOM,
       MAX_ZOOM,
       ZOOM_STEP,
-      viewport,
-      canvas,
+      scroller,
+      pagesEl,
       loading,
       status,
       error,
-      pageNumber,
-      pageCount,
-      zoom,
       ready,
-      changePage,
+      pageCount,
+      currentPage,
+      zoom,
       changeZoom,
+      resetZoom,
     };
   },
 });
@@ -295,7 +445,7 @@ export default defineComponent({
 .pdf-reader__controls {
   position: sticky;
   top: 4.75rem;
-  z-index: 2;
+  z-index: 3;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -335,6 +485,10 @@ export default defineComponent({
   font-size: 1rem;
 }
 
+.pdf-reader__control--reset {
+  font-size: 0.8rem;
+}
+
 .pdf-reader__page,
 .pdf-reader__zoom {
   color: var(--color-muted-faint);
@@ -348,21 +502,84 @@ export default defineComponent({
   background: rgb(var(--color-text-rgb) / 0.18);
 }
 
-.pdf-reader__viewport {
+.pdf-reader__scroller {
   min-width: 0;
-  overflow: auto;
-  padding: clamp(0.45rem, 2vw, 1.25rem);
-  background: rgb(var(--color-text-rgb) / 0.045);
-  overscroll-behavior: contain;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
   -webkit-overflow-scrolling: touch;
 }
 
-.pdf-reader__canvas {
-  display: block;
-  max-width: none;
-  margin: 0 auto;
+.pdf-reader__pages {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.75rem, 2vw, 1.5rem);
+  padding: clamp(0.45rem, 2vw, 1.25rem) 0;
+  width: 100%;
+  min-width: min-content;
+}
+
+/* Page wrapper + pdf.js text-layer support. Elements below are created
+   imperatively, so :deep is required for the scoped styles to reach them. */
+.pdf-reader__pages :deep(.pdf-page) {
+  --user-unit: 1;
+  --total-scale-factor: calc(var(--scale-factor) * var(--user-unit));
+  --scale-round-x: 1px;
+  --scale-round-y: 1px;
+  position: relative;
+  flex: 0 0 auto;
   background: #fff;
   box-shadow: 0 0.7rem 2.4rem rgb(0 0 0 / 0.13);
+}
+
+.pdf-reader__pages :deep(.pdf-page__canvas) {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pdf-reader__pages :deep(.textLayer) {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 1;
+}
+
+.pdf-reader__pages :deep(.textLayer :is(span, br)) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.pdf-reader__pages :deep(.textLayer > :not(.markedContent)),
+.pdf-reader__pages :deep(.textLayer .markedContent span:not(.markedContent)) {
+  z-index: 1;
+}
+
+.pdf-reader__pages :deep(.textLayer span.markedContent) {
+  top: 0;
+  height: 0;
+}
+
+.pdf-reader__pages :deep(.textLayer span[role="img"]) {
+  user-select: none;
+  cursor: default;
+}
+
+.pdf-reader__pages :deep(.textLayer ::selection) {
+  background: rgb(90 130 210 / 0.35);
 }
 
 .pdf-reader__fallback {
@@ -393,8 +610,8 @@ export default defineComponent({
     display: none;
   }
 
-  .pdf-reader__viewport {
-    margin-inline: -0.75rem;
+  .pdf-reader__pages {
+    gap: 0.75rem;
   }
 }
 </style>
