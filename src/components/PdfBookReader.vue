@@ -4,43 +4,7 @@
       {{ status || "Đang chuẩn bị trình đọc PDF..." }}
     </p>
 
-    <div v-if="ready && !error" class="pdf-reader__controls" aria-label="Điều khiển PDF">
-      <span class="pdf-reader__page">Trang {{ currentPage }} / {{ pageCount }}</span>
-
-      <span class="pdf-reader__separator" aria-hidden="true"></span>
-
-      <button
-        type="button"
-        class="pdf-reader__control pdf-reader__control--zoom"
-        :disabled="zoom <= MIN_ZOOM"
-        aria-label="Thu nhỏ"
-        @click="changeZoom(-ZOOM_STEP)"
-      >
-        −
-      </button>
-      <span class="pdf-reader__zoom">{{ Math.round(zoom * 100) }}%</span>
-      <button
-        type="button"
-        class="pdf-reader__control pdf-reader__control--zoom"
-        :disabled="zoom >= MAX_ZOOM"
-        aria-label="Phóng to"
-        @click="changeZoom(ZOOM_STEP)"
-      >
-        +
-      </button>
-      <button
-        v-if="zoom !== 1"
-        type="button"
-        class="pdf-reader__control pdf-reader__control--reset"
-        @click="resetZoom"
-      >
-        Vừa khung
-      </button>
-    </div>
-
-    <div v-show="ready && !error" ref="scroller" class="pdf-reader__scroller">
-      <div ref="pagesEl" class="pdf-reader__pages"></div>
-    </div>
+    <div v-show="ready && !error" ref="pagesEl" class="pdf-reader__pages"></div>
 
     <div v-if="error" class="pdf-reader__fallback">
       <p class="page-reading-copy">{{ error }}</p>
@@ -53,10 +17,8 @@
 
 <script>
 import { defineComponent, nextTick, onBeforeUnmount, onMounted, ref } from "vue";
+import { loadPdfjs } from "src/utils/pdfjs";
 
-const MIN_ZOOM = 0.6;
-const MAX_ZOOM = 3;
-const ZOOM_STEP = 0.2;
 const MAX_PAGE_WIDTH = 860; // css px – comfortable reading column on desktop
 const MAX_PIXEL_RATIO = 2;
 const MAX_CANVAS_PIXELS = 16_000_000;
@@ -76,15 +38,12 @@ export default defineComponent({
     },
   },
   setup(props) {
-    const scroller = ref(null);
     const pagesEl = ref(null);
     const loading = ref(true);
     const status = ref("Đang chuẩn bị trình đọc PDF...");
     const error = ref("");
     const ready = ref(false);
     const pageCount = ref(0);
-    const currentPage = ref(1);
-    const zoom = ref(1);
 
     let pdfjs = null;
     let pdfDocument = null;
@@ -92,7 +51,6 @@ export default defineComponent({
     let renderObserver = null;
     let resizeObserver = null;
     let resizeTimer = null;
-    let scrollFrame = 0;
 
     // Per-page bookkeeping. states[i] -> descriptor for page i + 1.
     const states = [];
@@ -127,7 +85,7 @@ export default defineComponent({
     // Size (and set the css scale on) a page wrapper so it reserves the
     // correct space before its canvas is rendered.
     function layoutPage(state) {
-      const displayWidth = getBaseFitWidth() * zoom.value;
+      const displayWidth = getBaseFitWidth();
       const cssScale = displayWidth / state.baseW;
       state.displayWidth = displayWidth;
       state.el.style.width = `${Math.floor(displayWidth)}px`;
@@ -229,29 +187,15 @@ export default defineComponent({
       state.rendered = false;
     }
 
-    function updateCurrentPage() {
-      const target = window.innerHeight / 2;
-      let best = currentPage.value;
-      let bestDistance = Infinity;
+    // The page the reader is currently on: the last one whose top edge has
+    // reached the top of the viewport. Computed on demand — no scroll listener.
+    function findAnchorPage() {
+      let anchor = states[0] || null;
       for (const state of states) {
-        const rect = state.el.getBoundingClientRect();
-        if (rect.bottom < 0 || rect.top > window.innerHeight) continue;
-        const center = rect.top + rect.height / 2;
-        const distance = Math.abs(center - target);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          best = state.num;
-        }
+        if (state.el.getBoundingClientRect().top > 8) break;
+        anchor = state;
       }
-      if (best !== currentPage.value) currentPage.value = best;
-    }
-
-    function onScroll() {
-      if (scrollFrame) return;
-      scrollFrame = window.requestAnimationFrame(() => {
-        scrollFrame = 0;
-        updateCurrentPage();
-      });
+      return anchor;
     }
 
     function onKeydown(event) {
@@ -260,8 +204,10 @@ export default defineComponent({
         return;
       }
       if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        const current = findAnchorPage();
+        if (!current) return;
         const delta = event.key === "ArrowRight" ? 1 : -1;
-        const next = Math.min(pageCount.value, Math.max(1, currentPage.value + delta));
+        const next = Math.min(pageCount.value, Math.max(1, current.num + delta));
         const state = states[next - 1];
         if (state) {
           event.preventDefault();
@@ -271,30 +217,17 @@ export default defineComponent({
     }
 
     function relayoutAll() {
-      const anchor = currentPage.value;
+      const anchor = findAnchorPage();
       for (const state of states) {
-        // Re-render at the new scale for crispness.
+        // Re-render at the new width for crispness.
         teardownPage(state);
         layoutPage(state);
         renderObserver?.observe(state.el);
       }
       // Keep the reader anchored to the page the user was on.
       nextTick(() => {
-        states[anchor - 1]?.el.scrollIntoView({ block: "start" });
+        anchor?.el.scrollIntoView({ block: "start" });
       });
-    }
-
-    async function changeZoom(offset) {
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((zoom.value + offset).toFixed(2))));
-      if (next === zoom.value) return;
-      zoom.value = next;
-      relayoutAll();
-    }
-
-    function resetZoom() {
-      if (zoom.value === 1) return;
-      zoom.value = 1;
-      relayoutAll();
     }
 
     function buildPages(firstBase) {
@@ -357,12 +290,7 @@ export default defineComponent({
 
     async function loadPdf() {
       try {
-        const [pdfModule, workerModule] = await Promise.all([
-          import("pdfjs-dist/legacy/build/pdf.mjs"),
-          import("pdfjs-dist/legacy/build/pdf.worker.min.mjs?url"),
-        ]);
-        pdfjs = pdfModule;
-        pdfjs.GlobalWorkerOptions.workerSrc = workerModule.default;
+        pdfjs = await loadPdfjs();
 
         loadingTask = pdfjs.getDocument({ url: props.src });
         pdfDocument = await loadingTask.promise;
@@ -379,7 +307,6 @@ export default defineComponent({
         buildPages(firstBase);
         observePages();
         observeResize();
-        updateCurrentPage();
       } catch (_error) {
         loading.value = false;
         status.value = "";
@@ -391,15 +318,12 @@ export default defineComponent({
 
     onMounted(() => {
       window.addEventListener("keydown", onKeydown);
-      window.addEventListener("scroll", onScroll, { passive: true });
       loadPdf();
     });
 
     onBeforeUnmount(() => {
       window.removeEventListener("keydown", onKeydown);
-      window.removeEventListener("scroll", onScroll);
       window.clearTimeout(resizeTimer);
-      if (scrollFrame) window.cancelAnimationFrame(scrollFrame);
       renderObserver?.disconnect();
       resizeObserver?.disconnect();
       for (const state of states) teardownPage(state);
@@ -411,20 +335,11 @@ export default defineComponent({
     });
 
     return {
-      MIN_ZOOM,
-      MAX_ZOOM,
-      ZOOM_STEP,
-      scroller,
       pagesEl,
       loading,
       status,
       error,
       ready,
-      pageCount,
-      currentPage,
-      zoom,
-      changeZoom,
-      resetZoom,
     };
   },
 });
@@ -442,74 +357,6 @@ export default defineComponent({
   color: var(--color-muted-ghost);
 }
 
-.pdf-reader__controls {
-  position: sticky;
-  top: 4.75rem;
-  z-index: 3;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem 1rem;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 auto;
-  padding: 0.55rem 0.9rem;
-  background: var(--surface-panel-bg);
-  border-bottom: 1px solid rgb(var(--color-text-rgb) / 0.14);
-  backdrop-filter: blur(12px);
-}
-
-.pdf-reader__control {
-  border: none;
-  background: none;
-  color: var(--color-muted);
-  padding: 0.2rem 0;
-  font: inherit;
-  font-size: 0.82rem;
-  cursor: pointer;
-}
-
-.pdf-reader__control:hover:not(:disabled),
-.pdf-reader__control:focus-visible {
-  color: var(--color-text);
-}
-
-.pdf-reader__control:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-
-.pdf-reader__control--zoom {
-  min-width: 1.25rem;
-  font-size: 1rem;
-}
-
-.pdf-reader__control--reset {
-  font-size: 0.8rem;
-}
-
-.pdf-reader__page,
-.pdf-reader__zoom {
-  color: var(--color-muted-faint);
-  font-size: 0.8rem;
-  white-space: nowrap;
-}
-
-.pdf-reader__separator {
-  width: 1px;
-  height: 1rem;
-  background: rgb(var(--color-text-rgb) / 0.18);
-}
-
-.pdf-reader__scroller {
-  min-width: 0;
-  overflow-x: auto;
-  overflow-y: visible;
-  overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
 .pdf-reader__pages {
   display: flex;
   flex-direction: column;
@@ -517,7 +364,7 @@ export default defineComponent({
   gap: clamp(0.75rem, 2vw, 1.5rem);
   padding: clamp(0.45rem, 2vw, 1.25rem) 0;
   width: 100%;
-  min-width: min-content;
+  min-width: 0;
 }
 
 /* Page wrapper + pdf.js text-layer support. Elements below are created
@@ -599,17 +446,6 @@ export default defineComponent({
 }
 
 @media (max-width: 640px) {
-  .pdf-reader__controls {
-    top: 4.25rem;
-    gap: 0.4rem 0.75rem;
-    width: 100%;
-    padding-inline: 0.45rem;
-  }
-
-  .pdf-reader__separator {
-    display: none;
-  }
-
   .pdf-reader__pages {
     gap: 0.75rem;
   }

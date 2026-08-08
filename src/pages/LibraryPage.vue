@@ -52,6 +52,16 @@
               loading="lazy"
               @error="markCoverFailed(book.id)"
             />
+            <PdfCoverThumb
+              v-else-if="book.fileFormat === 'pdf'"
+              :src="book.fileUrl"
+              :alt="`Bìa sách ${book.title}`"
+            >
+              <div class="library-book-card__cover-fallback" aria-hidden="true">
+                <span class="library-book-card__cover-format">{{ book.fileFormat.toUpperCase() }}</span>
+                <span class="library-book-card__cover-label">ebook</span>
+              </div>
+            </PdfCoverThumb>
             <div v-else class="library-book-card__cover-fallback" aria-hidden="true">
               <span class="library-book-card__cover-format">{{ book.fileFormat.toUpperCase() }}</span>
               <span class="library-book-card__cover-label">ebook</span>
@@ -201,6 +211,7 @@ import { computed, defineComponent, onBeforeUnmount, onMounted, reactive, ref, w
 import authStore from "src/stores/authStore";
 import { API_BASE } from "src/utils/runtime";
 import { uploadEbookToLibrary, uploadImageToMediaStore } from "src/utils/mediaUpload";
+import PdfCoverThumb from "src/components/PdfCoverThumb.vue";
 
 const FORMAT_OPTIONS = [
   { value: "", label: "Tất cả" },
@@ -213,6 +224,9 @@ const FORMAT_OPTIONS = [
 
 export default defineComponent({
   name: "LibraryPage",
+  components: {
+    PdfCoverThumb,
+  },
   setup() {
     const PAGE_SIZE = 12;
     const books = ref([]);
