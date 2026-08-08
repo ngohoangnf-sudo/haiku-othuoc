@@ -4,7 +4,9 @@
       {{ status || "Đang chuẩn bị trình đọc PDF..." }}
     </p>
 
-    <div v-show="ready && !error" ref="pagesEl" class="pdf-reader__pages"></div>
+    <div v-show="ready && !error" ref="scroller" class="pdf-reader__scroller">
+      <div ref="pagesEl" class="pdf-reader__pages"></div>
+    </div>
 
     <div v-if="error" class="pdf-reader__fallback">
       <p class="page-reading-copy">{{ error }}</p>
@@ -25,6 +27,18 @@ const MAX_CANVAS_PIXELS = 16_000_000;
 // Render / keep pages within this vertical distance of the viewport.
 const RENDER_MARGIN = "1400px";
 
+// Fitting a page to the column is the right default, but a landscape page on a
+// phone ends up with unreadably small type, and the site disables the browser's
+// own pinch-zoom. So the reader handles pinch and double-tap itself.
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 5;
+const DOUBLE_TAP_ZOOM = 2.5;
+const DOUBLE_TAP_MS = 300;
+const DOUBLE_TAP_SLOP = 30;
+// Zooming rescales the existing canvases straight away, which goes soft; this
+// is how long we wait after the gesture settles before re-rendering sharply.
+const RESHARPEN_DELAY = 220;
+
 export default defineComponent({
   name: "PdfBookReader",
   props: {
@@ -38,6 +52,7 @@ export default defineComponent({
     },
   },
   setup(props) {
+    const scroller = ref(null);
     const pagesEl = ref(null);
     const loading = ref(true);
     const status = ref("Đang chuẩn bị trình đọc PDF...");
@@ -51,6 +66,13 @@ export default defineComponent({
     let renderObserver = null;
     let resizeObserver = null;
     let resizeTimer = null;
+    let zoom = 1;
+    let resharpenTimer = null;
+    let pinchStartDistance = 0;
+    let pinchStartZoom = 1;
+    let lastTapTime = 0;
+    let lastTapX = 0;
+    let lastTapY = 0;
 
     // Per-page bookkeeping. states[i] -> descriptor for page i + 1.
     const states = [];
@@ -65,13 +87,18 @@ export default defineComponent({
       return promise;
     }
 
+    // Measured on the scroller, never on the pages element: the latter grows
+    // with its zoomed contents, which would feed the zoom back into the fit
+    // width and run away.
     function getAvailableWidth() {
-      const element = pagesEl.value;
+      const element = scroller.value;
       if (!element || !element.clientWidth) return 0;
-      const styles = window.getComputedStyle(element);
-      const horizontalPadding =
-        (Number.parseFloat(styles.paddingLeft) || 0) +
-        (Number.parseFloat(styles.paddingRight) || 0);
+      const pages = pagesEl.value;
+      const styles = pages ? window.getComputedStyle(pages) : null;
+      const horizontalPadding = styles
+        ? (Number.parseFloat(styles.paddingLeft) || 0) +
+          (Number.parseFloat(styles.paddingRight) || 0)
+        : 0;
       return Math.max(1, element.clientWidth - horizontalPadding);
     }
 
@@ -85,7 +112,7 @@ export default defineComponent({
     // Size (and set the css scale on) a page wrapper so it reserves the
     // correct space before its canvas is rendered.
     function layoutPage(state) {
-      const displayWidth = getBaseFitWidth();
+      const displayWidth = getBaseFitWidth() * zoom;
       const cssScale = displayWidth / state.baseW;
       state.displayWidth = displayWidth;
       state.el.style.width = `${Math.floor(displayWidth)}px`;
@@ -155,6 +182,7 @@ export default defineComponent({
         state.canvas = canvas;
         state.textLayer = textLayer;
         state.rendered = true;
+        state.renderedScale = cssScale;
       } catch (err) {
         if (err?.name === "RenderingCancelledException" || seq !== state.seq) return;
         // Leave the placeholder in place; a single failed page shouldn't break the book.
@@ -185,6 +213,7 @@ export default defineComponent({
       }
       state.el.replaceChildren();
       state.rendered = false;
+      state.renderedScale = 0;
     }
 
     // The page the reader is currently on: the last one whose top edge has
@@ -230,6 +259,129 @@ export default defineComponent({
       });
     }
 
+    // Resize the page boxes only. The canvases are stretched by CSS and the
+    // text layer follows --scale-factor, so this tracks a pinch at no cost —
+    // it just goes soft until resharpen() catches up.
+    function applyZoomLayout() {
+      for (const state of states) layoutPage(state);
+    }
+
+    // Redraw whatever is on screen at the current zoom so the type is sharp
+    // again. Deliberately leaves scroll alone, unlike relayoutAll.
+    function resharpen() {
+      for (const state of states) {
+        const rect = state.el.getBoundingClientRect();
+        const onScreen = rect.bottom > -400 && rect.top < window.innerHeight + 400;
+        if (!onScreen) continue;
+
+        // A page that hasn't started will pick up the current scale by itself.
+        if (!state.rendered && !state.rendering) continue;
+        // One already drawn at this scale has nothing to gain.
+        const targetScale = (getBaseFitWidth() * zoom) / state.baseW;
+        if (state.rendered && Math.abs(state.renderedScale - targetScale) < 0.01) continue;
+
+        // Covers pages still mid-render too: they would otherwise finish at the
+        // scale they started with and stay soft. teardownPage bumps the
+        // sequence, so the in-flight render bails out on its own.
+        teardownPage(state);
+        renderObserver?.unobserve(state.el);
+        renderObserver?.observe(state.el);
+      }
+    }
+
+    function scheduleResharpen() {
+      window.clearTimeout(resharpenTimer);
+      resharpenTimer = window.setTimeout(resharpen, RESHARPEN_DELAY);
+    }
+
+    // Zooms around a point on screen so whatever the reader is looking at
+    // stays put instead of sliding away.
+    function setZoom(nextZoom, focalX, focalY) {
+      const clamped = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextZoom));
+      if (Math.abs(clamped - zoom) < 0.001) return;
+
+      const element = scroller.value;
+      const ratio = clamped / zoom;
+      const rect = element?.getBoundingClientRect();
+      const pointX = (focalX ?? window.innerWidth / 2) - (rect?.left ?? 0);
+      const pointY = focalY ?? window.innerHeight / 2;
+      const scrollLeft = element?.scrollLeft ?? 0;
+      const documentTop = window.scrollY + pointY;
+      const pagesTop = (pagesEl.value?.getBoundingClientRect().top ?? 0) + window.scrollY;
+
+      zoom = clamped;
+      applyZoomLayout();
+
+      if (element) {
+        element.scrollLeft = (scrollLeft + pointX) * ratio - pointX;
+      }
+      // Only the pages grow, so scale the offset within them, not the whole page.
+      const offsetInPages = documentTop - pagesTop;
+      window.scrollTo({ top: pagesTop + offsetInPages * ratio - pointY });
+
+      scheduleResharpen();
+    }
+
+    function touchDistance(touches) {
+      const dx = touches[0].clientX - touches[1].clientX;
+      const dy = touches[0].clientY - touches[1].clientY;
+      return Math.hypot(dx, dy);
+    }
+
+    function onTouchStart(event) {
+      if (event.touches.length !== 2) return;
+      pinchStartDistance = touchDistance(event.touches);
+      pinchStartZoom = zoom;
+    }
+
+    function onTouchMove(event) {
+      if (event.touches.length !== 2 || !pinchStartDistance) return;
+      // Single-finger scrolling is left to the browser; only pinches are ours.
+      event.preventDefault();
+      const distance = touchDistance(event.touches);
+      const focalX = (event.touches[0].clientX + event.touches[1].clientX) / 2;
+      const focalY = (event.touches[0].clientY + event.touches[1].clientY) / 2;
+      setZoom((pinchStartZoom * distance) / pinchStartDistance, focalX, focalY);
+    }
+
+    function onTouchEnd(event) {
+      if (event.touches.length < 2) pinchStartDistance = 0;
+      if (event.touches.length > 0 || event.changedTouches.length !== 1) return;
+
+      const touch = event.changedTouches[0];
+      const now = Date.now();
+      const isDoubleTap =
+        now - lastTapTime < DOUBLE_TAP_MS &&
+        Math.abs(touch.clientX - lastTapX) < DOUBLE_TAP_SLOP &&
+        Math.abs(touch.clientY - lastTapY) < DOUBLE_TAP_SLOP;
+
+      if (isDoubleTap) {
+        lastTapTime = 0;
+        setZoom(zoom > 1 ? 1 : DOUBLE_TAP_ZOOM, touch.clientX, touch.clientY);
+        return;
+      }
+
+      lastTapTime = now;
+      lastTapX = touch.clientX;
+      lastTapY = touch.clientY;
+    }
+
+    function bindGestures() {
+      const element = scroller.value;
+      if (!element) return;
+      element.addEventListener("touchstart", onTouchStart, { passive: true });
+      element.addEventListener("touchmove", onTouchMove, { passive: false });
+      element.addEventListener("touchend", onTouchEnd, { passive: true });
+    }
+
+    function unbindGestures() {
+      const element = scroller.value;
+      if (!element) return;
+      element.removeEventListener("touchstart", onTouchStart);
+      element.removeEventListener("touchmove", onTouchMove);
+      element.removeEventListener("touchend", onTouchEnd);
+    }
+
     function buildPages(firstBase) {
       const fragment = document.createDocumentFragment();
       for (let num = 1; num <= pageCount.value; num += 1) {
@@ -246,6 +398,7 @@ export default defineComponent({
           textLayer: null,
           renderTask: null,
           rendered: false,
+          renderedScale: 0,
           rendering: false,
           seq: 0,
         };
@@ -285,7 +438,7 @@ export default defineComponent({
         window.clearTimeout(resizeTimer);
         resizeTimer = window.setTimeout(() => relayoutAll(), 150);
       });
-      resizeObserver.observe(pagesEl.value);
+      resizeObserver.observe(scroller.value);
     }
 
     async function loadPdf() {
@@ -307,6 +460,7 @@ export default defineComponent({
         buildPages(firstBase);
         observePages();
         observeResize();
+        bindGestures();
       } catch (_error) {
         loading.value = false;
         status.value = "";
@@ -324,6 +478,8 @@ export default defineComponent({
     onBeforeUnmount(() => {
       window.removeEventListener("keydown", onKeydown);
       window.clearTimeout(resizeTimer);
+      window.clearTimeout(resharpenTimer);
+      unbindGestures();
       renderObserver?.disconnect();
       resizeObserver?.disconnect();
       for (const state of states) teardownPage(state);
@@ -335,6 +491,7 @@ export default defineComponent({
     });
 
     return {
+      scroller,
       pagesEl,
       loading,
       status,
@@ -357,6 +514,16 @@ export default defineComponent({
   color: var(--color-muted-ghost);
 }
 
+/* Zoomed pages are wider than the column, so they pan horizontally here while
+   the document keeps scrolling vertically with the window. */
+.pdf-reader__scroller {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
 .pdf-reader__pages {
   display: flex;
   flex-direction: column;
@@ -364,7 +531,7 @@ export default defineComponent({
   gap: clamp(0.75rem, 2vw, 1.5rem);
   padding: clamp(0.45rem, 2vw, 1.25rem) 0;
   width: 100%;
-  min-width: 0;
+  min-width: min-content;
 }
 
 /* Page wrapper + pdf.js text-layer support. Elements below are created
